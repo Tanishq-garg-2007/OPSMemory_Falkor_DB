@@ -10,7 +10,7 @@ logger = get_logger("google_genai")
 
 
 class GoogleGenAIClient(BaseLLMClient):
-    """Client for Google GenAI API targeting Gemma 4 31B (gemma-4-31b-it)."""
+    """Client for Google GenAI API targeting Gemma 4 31B (gemma-4-31b-it) with automatic Ollama/Mock fallback."""
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
         self.api_key = self.settings.effective_google_api_key
@@ -27,9 +27,35 @@ class GoogleGenAIClient(BaseLLMClient):
         except Exception as e:
             logger.warning(f"Could not initialize google.genai client: {e}")
 
+    async def _execute_text_fallback(self, prompt: str, system_prompt: Optional[str] = None, reason: str = "") -> str:
+        logger.warning(f"Google GenAI unavailable ({reason}). Falling back to local Ollama...")
+        try:
+            from app.llm.ollama import OllamaClient
+            ollama = OllamaClient(self.settings)
+            return await asyncio.wait_for(ollama.generate_text(prompt, system_prompt), timeout=45.0)
+        except Exception as e:
+            err_msg = str(e) or type(e).__name__
+            logger.warning(f"Local Ollama fallback failed ({err_msg}). Falling back to MockLLMClient.")
+            from app.llm.mock import MockLLMClient
+            mock = MockLLMClient()
+            return await mock.generate_text(prompt, system_prompt)
+
+    async def _execute_json_fallback(self, prompt: str, system_prompt: Optional[str] = None, reason: str = "") -> Dict[str, Any]:
+        logger.warning(f"Google GenAI JSON generation unavailable ({reason}). Falling back to local Ollama...")
+        try:
+            from app.llm.ollama import OllamaClient
+            ollama = OllamaClient(self.settings)
+            return await asyncio.wait_for(ollama.generate_json(prompt, system_prompt), timeout=45.0)
+        except Exception as e:
+            err_msg = str(e) or type(e).__name__
+            logger.warning(f"Local Ollama JSON fallback failed ({err_msg}). Falling back to MockLLMClient.")
+            from app.llm.mock import MockLLMClient
+            mock = MockLLMClient()
+            return await mock.generate_json(prompt, system_prompt)
+
     async def generate_text(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         if not self._client:
-            raise LLMUnavailableError("Google GenAI client not initialized or missing API key")
+            return await self._execute_text_fallback(prompt, system_prompt, reason="client not initialized or missing API key")
 
         full_prompt = f"System: {system_prompt}\n\nUser: {prompt}" if system_prompt else prompt
 
@@ -50,19 +76,30 @@ class GoogleGenAIClient(BaseLLMClient):
             except Exception as e:
                 logger.warning(f"Google GenAI attempt {attempt + 1} failed: {e}")
                 if attempt == self.settings.LLM_MAX_RETRIES:
-                    raise LLMUnavailableError(f"Google GenAI failed after {self.settings.LLM_MAX_RETRIES + 1} attempts: {e}")
+                    return await self._execute_text_fallback(
+                        prompt,
+                        system_prompt,
+                        reason=f"Google GenAI failed after {self.settings.LLM_MAX_RETRIES + 1} attempts: {e}"
+                    )
                 await asyncio.sleep(1.0 * (attempt + 1))
-        raise LLMUnavailableError("Google GenAI generation failed")
+        return await self._execute_text_fallback(prompt, system_prompt, reason="Google GenAI retry loop exhausted")
 
     async def generate_json(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+        if not self._client:
+            return await self._execute_json_fallback(prompt, system_prompt, reason="client not initialized or missing API key")
+
         json_sys_prompt = (
             (system_prompt or "") + "\nRespond with valid JSON only. Do not wrap in markdown or commentary."
         ).strip()
-        text = await self.generate_text(prompt, json_sys_prompt)
         try:
-            return extract_json_from_text(text)
+            text = await self.generate_text(prompt, json_sys_prompt)
+            try:
+                return extract_json_from_text(text)
+            except Exception as e:
+                logger.warning(f"Malformed JSON from Google GenAI, retrying once: {e}")
+                repair_prompt = f"The following output was not valid JSON:\n{text}\n\nProvide ONLY valid JSON:"
+                text_retry = await self.generate_text(repair_prompt)
+                return extract_json_from_text(text_retry)
         except Exception as e:
-            logger.warning(f"Malformed JSON from Google GenAI, retrying once: {e}")
-            repair_prompt = f"The following output was not valid JSON:\n{text}\n\nProvide ONLY valid JSON:"
-            text_retry = await self.generate_text(repair_prompt)
-            return extract_json_from_text(text_retry)
+            return await self._execute_json_fallback(prompt, system_prompt, reason=str(e))
+
