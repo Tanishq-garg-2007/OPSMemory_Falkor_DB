@@ -1,0 +1,23 @@
+case_id,difficulty,passed,latency_sec,input,failures
+hard_01,hard,True,0.0969,Trace the full dependency chain starting from checkout-ui do,
+hard_02,hard,False,0.0286,"Explain how inc-101 occurred, how it was resolved, and what ",Missing expected terms: ['v2.2']
+hard_03,hard,True,0.1711,A deployment of payments-api causes immediate database error,
+hard_04,hard,False,0.0238,"Is payments-api currently running v2.3, and why was that cha",Missing expected terms: ['v2.3']
+hard_05,hard,True,0.0231,"If checkout-ui is reporting errors, which two backend servic",
+hard_06,hard,True,0.0211,What prior incident outcome led to the rollback to v2.2 and ,
+hard_07,hard,True,0.0633,Provide the complete operational profile for payments-api: c,
+hard_08,hard,True,0.0159,Why should queries about current facts not cite the v2.3 mem,
+hard_09,hard,True,0.0156,"If a release happens on Sunday at 03:00 UTC and fails, does ",
+hard_10,hard,True,0.0232,What is the difference in ownership and version between paym,
+hard_11,hard,True,0.2002,Connect the causal link from payments-api v2.3 deployment to,
+hard_12,hard,True,0.0279,Verify whether auth-service was superseded or rolled back du,
+hard_13,hard,True,0.0312,"If an incident is declared on payments-api at 14:00, by what",
+hard_14,hard,True,0.0193,What are all known dependencies of checkout-ui direct and in,
+hard_15,hard,True,0.0266,How should an incident review summary be formatted for Priya,
+hard_16,hard,True,0.0202,Identify any unresolved tasks regarding database stability f,
+hard_17,hard,True,0.0345,What is the historical evidence that payments-api was once a,
+hard_18,hard,True,0.0251,Does postgres-orders have any upstream dependents other than,
+hard_19,hard,True,0.0182,Contrast the version of payments-api in Beta with its docume,
+hard_20,hard,True,0.0208,What caused latency in Beta payments-api and which team inve,
+hard_21,hard,True,0.0235,"If payments-api is rolled back via helm, what is the mandato",
+hard_22,hard,True,0.0309,Compare the current version of payments-api with its version,
