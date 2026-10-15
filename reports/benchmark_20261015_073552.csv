@@ -1,0 +1,23 @@
+case_id,difficulty,passed,latency_sec,input,failures
+hard_01,hard,True,61.7643,Trace the full dependency chain starting from checkout-ui do,
+hard_02,hard,True,35.7696,"Explain how inc-101 occurred, how it was resolved, and what ",
+hard_03,hard,True,111.4767,A deployment of payments-api causes immediate database error,
+hard_04,hard,True,58.6049,"Is payments-api currently running v2.3, and why was that cha",
+hard_05,hard,True,14.138,"If checkout-ui is reporting errors, which two backend servic",
+hard_06,hard,True,36.14,What prior incident outcome led to the rollback to v2.2 and ,
+hard_07,hard,True,96.7025,Provide the complete operational profile for payments-api: c,
+hard_08,hard,True,22.527,Why should queries about current facts not cite the v2.3 mem,
+hard_09,hard,True,32.5811,"If a release happens on Sunday at 03:00 UTC and fails, does ",
+hard_10,hard,False,22.0006,What is the difference in ownership and version between paym,"Missing expected terms: ['payments-api', 'payments-worker']"
+hard_11,hard,False,195.8395,Connect the causal link from payments-api v2.3 deployment to,Missing expected terms: ['connection pool']
+hard_12,hard,False,248.5281,Verify whether auth-service was superseded or rolled back du,Missing expected terms: ['payments-api']
+hard_13,hard,True,26.1612,"If an incident is declared on payments-api at 14:00, by what",
+hard_14,hard,True,20.38,What are all known dependencies of checkout-ui direct and in,
+hard_15,hard,False,16.8966,How should an incident review summary be formatted for Priya,Missing expected terms: ['concise summaries']
+hard_16,hard,True,18.942,Identify any unresolved tasks regarding database stability f,
+hard_17,hard,True,59.1866,What is the historical evidence that payments-api was once a,
+hard_18,hard,False,24.0655,Does postgres-orders have any upstream dependents other than,Missing expected terms: ['payments-api']
+hard_19,hard,True,16.0752,Contrast the version of payments-api in Beta with its docume,
+hard_20,hard,False,27.4456,What caused latency in Beta payments-api and which team inve,"Missing expected terms: ['inc-beta-01', 'Team Billing Beta']"
+hard_21,hard,False,17.7156,"If payments-api is rolled back via helm, what is the mandato",Missing expected terms: ['healthz']
+hard_22,hard,True,239.7234,Compare the current version of payments-api with its version,

@@ -177,6 +177,133 @@ class MemoryRepository:
             self._falkor_client = None
             logger.warning(f"FalkorDB unavailable on {self.settings.FALKORDB_HOST}:{self.settings.FALKORDB_PORT} ({e}). Using embedded durable persistence.")
 
+    def _get_graph(self, graph_name: str):
+        if not self._falkor_connected or not self._falkor_client:
+            self._try_init_falkordb()
+        if not self._falkor_connected or not self._falkor_client:
+            raise RuntimeError("FalkorDB connection required. Graph engine is not available.")
+        return self._falkor_client.select_graph(graph_name)
+
+    def init_tenant_schema(self, tenant_id: str) -> None:
+        """Idempotently initialize FalkorDB indexes for tenant graph."""
+        if not self._falkor_connected or not self._falkor_client:
+            self._try_init_falkordb()
+        if not self._falkor_connected or not self._falkor_client:
+            return
+        graph_name = self.settings.tenant_graph_name(tenant_id)
+        graph = self._get_graph(graph_name)
+        # 1. Range indexes
+        for lbl in ["Entity", "Memory", "Task", "Session", "Turn", "Agent"]:
+            try:
+                graph.query(f"CREATE INDEX FOR (n:{lbl}) ON (n.id)")
+            except Exception:
+                pass
+        # 2. Full-text index on Memory
+        try:
+            graph.query("CREATE FULLTEXT INDEX FOR (m:Memory) ON (m.title, m.summary, m.subtype)")
+        except Exception:
+            pass
+        # 3. Vector index on Memory
+        try:
+            graph.query("CREATE VECTOR INDEX FOR (m:Memory) ON (m.embedding) OPTIONS {dimension: 64, similarityFunction: 'cosine'}")
+        except Exception:
+            pass
+        # 3b. Vector index on Entity
+        try:
+            graph.query("CREATE VECTOR INDEX FOR (e:Entity) ON (e.embedding) OPTIONS {dimension: 64, similarityFunction: 'cosine'}")
+        except Exception:
+            pass
+        # 4. Ensure default Agent nodes exist
+        try:
+            graph.query("""
+            MERGE (:Agent {id: 'agent_triage', tenant_id: $tenant_id, role: 'triage'})
+            MERGE (:Agent {id: 'agent_resolver', tenant_id: $tenant_id, role: 'resolver'})
+            MERGE (:Agent {id: 'agent_curator', tenant_id: $tenant_id, role: 'curator'})
+            """, {"tenant_id": tenant_id})
+        except Exception:
+            pass
+
+    def _node_to_task(self, node: Any) -> TaskModel:
+        props = getattr(node, "properties", node) if not isinstance(node, dict) else node
+        return TaskModel(
+            id=props.get("id", ""),
+            tenant_id=props.get("tenant_id", ""),
+            task_type=props.get("task_type", ""),
+            status=props.get("status", "pending"),
+            payload_json=props.get("payload_json", "{}"),
+            result_json=props.get("result_json") or None,
+            idempotency_key=props.get("idempotency_key"),
+            lease_owner=props.get("lease_owner") or None,
+            lease_expires=props.get("lease_expires") or None,
+            attempts=int(props.get("attempts", 0)),
+            version=int(props.get("version", 1)),
+            created_at=props.get("created_at", utc_now_iso()),
+            updated_at=props.get("updated_at", utc_now_iso())
+        )
+
+    def _node_to_memory(self, node: Any) -> MemoryModel:
+        props = getattr(node, "properties", node) if not isinstance(node, dict) else node
+        entities = []
+        if "entities_json" in props and props["entities_json"]:
+            try:
+                entities = json.loads(props["entities_json"])
+            except Exception:
+                entities = []
+        elif "entities" in props and isinstance(props["entities"], list):
+            entities = props["entities"]
+
+        ext_method = props.get("extraction_method")
+        if ext_method not in ("user_explicit", "deterministic", "llm"):
+            ext_method = "deterministic"
+
+        return MemoryModel(
+            id=props.get("id", ""),
+            tenant_id=props.get("tenant_id", ""),
+            memory_type=props.get("memory_type", "episodic"),
+            subtype=props.get("subtype", "general"),
+            title=props.get("title", ""),
+            summary=props.get("summary", ""),
+            content_json=props.get("content_json") or None,
+            status=props.get("status", "active"),
+            confidence=float(props.get("confidence", 1.0)),
+            valid_from=props.get("valid_from", utc_now_iso()),
+            valid_to=props.get("valid_to") or None,
+            observed_at=props.get("observed_at", utc_now_iso()),
+            created_at=props.get("created_at", utc_now_iso()),
+            updated_at=props.get("updated_at", utc_now_iso()),
+            version=int(props.get("version", 1)),
+            created_by=props.get("created_by") or "system",
+            extraction_method=ext_method,
+            idempotency_key=props.get("idempotency_key", props.get("id", "")),
+            entities=entities,
+            source_id=props.get("source_id") or None,
+            superseded_by=props.get("superseded_by") or None,
+            supersedes_id=props.get("supersedes_id") or None
+        )
+
+    def _node_to_entity(self, node: Any) -> EntityModel:
+        props = getattr(node, "properties", node) if not isinstance(node, dict) else node
+        aliases = []
+        if "aliases_json" in props and props["aliases_json"]:
+            try:
+                aliases = json.loads(props["aliases_json"])
+            except Exception:
+                aliases = []
+        elif "aliases" in props and isinstance(props["aliases"], list):
+            aliases = props["aliases"]
+
+        return EntityModel(
+            id=props.get("id", ""),
+            tenant_id=props.get("tenant_id", ""),
+            kind=props.get("kind", "service"),
+            name=props.get("name", ""),
+            aliases=aliases,
+            description=props.get("description", ""),
+            version=int(props.get("version", 1)),
+            created_at=props.get("created_at", utc_now_iso()),
+            updated_at=props.get("updated_at", utc_now_iso())
+        )
+
     def check_health(self) -> Dict[str, Any]:
         """Check persistence layer health."""
         sqlite_ok = False
@@ -197,10 +324,10 @@ class MemoryRepository:
                 falkor_ok = False
 
         return {
-            "ok": sqlite_ok,
+            "ok": falkor_ok,
             "sqlite": sqlite_ok,
             "falkordb_connected": falkor_ok,
-            "mode": "falkordb+sqlite" if falkor_ok else "sqlite_standalone"
+            "mode": "falkordb_native" if falkor_ok else "falkordb_unavailable"
         }
 
     # ==========================
@@ -229,22 +356,135 @@ class MemoryRepository:
         # FalkorDB sync if connected
         if self._falkor_connected and self._falkor_client:
             try:
+                from app.retrieval.vector_encoder import encode_vector
+                embedding_text = f"{entity.name} {' '.join(entity.aliases)} {entity.description or ''}"
+                ent_vec = encode_vector(embedding_text)
                 graph = self._falkor_client.select_graph(context.graph_name)
                 cypher = """
                 MERGE (e:Entity {id: $id, tenant_id: $tenant_id})
                 SET e.kind = $kind, e.name = $name, e.description = $desc,
+                    e.aliases = $aliases, e.aliases_json = $aliases_json,
+                    e.embedding = vecf32($embedding),
                     e.version = e.version + 1, e.updated_at = $now
                 RETURN e
                 """
                 graph.query(cypher, {
                     "id": entity.id, "tenant_id": entity.tenant_id, "kind": entity.kind,
-                    "name": entity.name, "desc": entity.description or "", "now": utc_now_iso()
+                    "name": entity.name, "desc": entity.description or "",
+                    "aliases": entity.aliases, "aliases_json": json.dumps(entity.aliases),
+                    "embedding": ent_vec, "now": utc_now_iso()
                 })
             except Exception as e:
                 logger.warning(f"FalkorDB entity sync error: {e}")
 
         get_cache().invalidate_tenant(context.tenant_id)
         return self.get_entity(context, entity.id)
+
+    save_entity = upsert_entity
+
+    def _node_to_entity(self, node: Any) -> EntityModel:
+        props = getattr(node, "properties", node) if not isinstance(node, dict) else node
+        aliases = []
+        if "aliases" in props and isinstance(props["aliases"], list):
+            aliases = props["aliases"]
+        elif "aliases_json" in props and props["aliases_json"]:
+            try:
+                aliases = json.loads(props["aliases_json"])
+            except Exception:
+                aliases = []
+        return EntityModel(
+            id=props.get("id", ""),
+            tenant_id=props.get("tenant_id", ""),
+            kind=props.get("kind", "service"),
+            name=props.get("name", ""),
+            aliases=aliases,
+            description=props.get("description") or props.get("desc") or None,
+            version=int(props.get("version", 1)),
+            created_at=props.get("created_at", utc_now_iso()),
+            updated_at=props.get("updated_at", utc_now_iso())
+        )
+
+    def find_anchor_entities(
+        self,
+        context: TenantContext,
+        query: str,
+        limit: int = 5
+    ) -> List[EntityModel]:
+        """Find starting graph anchor entities dynamically via vector similarity and alias matching in FalkorDB."""
+        anchors: List[EntityModel] = []
+        seen_names: Set[str] = set()
+        q_lower = query.lower()
+
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                from app.retrieval.vector_encoder import encode_vector
+                q_vec = encode_vector(query)
+
+                # 1. FalkorDB ANN Vector Search on :Entity
+                # 1. FalkorDB Exact & Alias Name Matching in Graph
+                cypher_all = """
+                MATCH (e:Entity {tenant_id: $tenant_id})
+                RETURN e
+                """
+                res_all = graph.query(cypher_all, {"tenant_id": context.tenant_id})
+                for row in res_all.result_set:
+                    ent = self._node_to_entity(row[0])
+                    if ent.name in seen_names:
+                        continue
+                    ent_norm = ent.name.lower()
+                    base = ent_norm.split("-")[0]
+                    aliases_norm = [a.lower() for a in ent.aliases]
+                    if (ent_norm in q_lower or 
+                        ent_norm.replace("-", " ") in q_lower or 
+                        (len(base) >= 4 and f" {base} " in f" {q_lower} ") or
+                        any(a in q_lower for a in aliases_norm)):
+                        seen_names.add(ent.name)
+                        anchors.append(ent)
+
+                # 2. FalkorDB ANN Vector Search on :Entity (strict sim >= 0.35)
+                try:
+                    cypher = """
+                    CALL db.idx.vector.queryNodes('Entity', 'embedding', $k, vecf32($vec)) YIELD node, score
+                    WHERE node.tenant_id = $tenant_id
+                    RETURN node, score
+                    ORDER BY score ASC
+                    LIMIT $limit
+                    """
+                    res = graph.query(cypher, {
+                        "k": limit * 3,
+                        "vec": q_vec,
+                        "tenant_id": context.tenant_id,
+                        "limit": limit
+                    })
+                    for row in res.result_set:
+                        ent = self._node_to_entity(row[0])
+                        dist = float(row[1]) if row[1] is not None else 1.0
+                        sim = max(0.0, 1.0 - dist)
+                        if sim >= 0.35 and ent.name not in seen_names:
+                            seen_names.add(ent.name)
+                            anchors.append(ent)
+                except Exception as e:
+                    logger.debug(f"Entity vector index query: {e}")
+            except Exception as e:
+                logger.warning(f"FalkorDB anchor search error: {e}")
+
+        # Fallback to local list_entities if graph is empty or disconnected
+        if not anchors:
+            for ent in self.list_entities(context):
+                if ent.name in seen_names:
+                    continue
+                ent_norm = ent.name.lower()
+                base = ent_norm.split("-")[0]
+                aliases_norm = [a.lower() for a in ent.aliases]
+                if (ent_norm in q_lower or 
+                    ent_norm.replace("-", " ") in q_lower or 
+                    (len(base) >= 4 and f" {base} " in f" {q_lower} ") or
+                    any(a in q_lower for a in aliases_norm)):
+                    seen_names.add(ent.name)
+                    anchors.append(ent)
+
+        return anchors[:limit]
 
     def get_entity(self, context: TenantContext, entity_id: str) -> Optional[EntityModel]:
         with self._get_sqlite_con() as con:
@@ -351,22 +591,58 @@ class MemoryRepository:
         # FalkorDB sync if available
         if self._falkor_connected and self._falkor_client:
             try:
-                graph = self._falkor_client.select_graph(context.graph_name)
+                graph = self._get_graph(context.graph_name)
+                from app.retrieval.vector_encoder import encode_vector
+                text_for_vec = f"{memory.title} {memory.summary} {memory.subtype} {' '.join(memory.entities)}"
+                embedding = encode_vector(text_for_vec)
+
                 cypher = """
                 MERGE (m:Memory {id: $id, tenant_id: $tenant_id})
                 SET m.memory_type = $mtype, m.subtype = $subtype, m.title = $title,
                     m.summary = $summary, m.status = $status, m.confidence = $conf,
                     m.valid_from = $valid_from, m.valid_to = $valid_to,
-                    m.version = $ver, m.updated_at = $now, m.idempotency_key = $idemp
+                    m.observed_at = $observed_at, m.created_at = $created_at,
+                    m.version = $ver, m.updated_at = $now, m.idempotency_key = $idemp,
+                    m.entities_json = $entities_json, m.content_json = $content_json,
+                    m.source_id = $source_id, m.superseded_by = $superseded_by,
+                    m.supersedes_id = $supersedes_id,
+                    m.embedding = vecf32($embedding)
                 RETURN m
                 """
                 graph.query(cypher, {
                     "id": memory.id, "tenant_id": memory.tenant_id, "mtype": memory.memory_type,
                     "subtype": memory.subtype, "title": memory.title, "summary": memory.summary,
                     "status": memory.status, "conf": memory.confidence, "valid_from": memory.valid_from,
-                    "valid_to": memory.valid_to or "", "ver": memory.version, "now": memory.updated_at,
-                    "idemp": memory.idempotency_key
+                    "valid_to": memory.valid_to or "", "observed_at": memory.observed_at,
+                    "created_at": memory.created_at, "ver": memory.version, "now": memory.updated_at,
+                    "idemp": memory.idempotency_key, "entities_json": json.dumps(memory.entities),
+                    "content_json": memory.content_json or "", "source_id": memory.source_id or "",
+                    "superseded_by": memory.superseded_by or "", "supersedes_id": memory.supersedes_id or "",
+                    "embedding": embedding
                 })
+
+                # Connect relationships in FalkorDB
+                from app.core.ids import entity_id
+                for ent_name in memory.entities:
+                    ent_slug = entity_id("service", ent_name, tenant_id=context.tenant_id)
+                    edge_cypher = """
+                    MATCH (m:Memory {id: $mid, tenant_id: $tid}), (e:Entity {id: $eid, tenant_id: $tid})
+                    MERGE (m)-[:MENTIONS]->(e)
+                    MERGE (m)-[:ABOUT]->(e)
+                    """
+                    graph.query(edge_cypher, {"mid": memory.id, "eid": ent_slug, "tid": context.tenant_id})
+
+                if memory.source_id:
+                    graph.query("""
+                    MATCH (m:Memory {id: $mid, tenant_id: $tid}), (s:Source {id: $sid, tenant_id: $tid})
+                    MERGE (m)-[:DERIVED_FROM]->(s)
+                    """, {"mid": memory.id, "sid": memory.source_id, "tid": context.tenant_id})
+
+                if memory.supersedes_id:
+                    graph.query("""
+                    MATCH (m:Memory {id: $mid, tenant_id: $tid}), (old:Memory {id: $oid, tenant_id: $tid})
+                    MERGE (m)-[:SUPERSEDES]->(old)
+                    """, {"mid": memory.id, "oid": memory.supersedes_id, "tid": context.tenant_id})
             except Exception as e:
                 logger.warning(f"FalkorDB memory sync error: {e}")
 
@@ -428,6 +704,18 @@ class MemoryRepository:
 
             con.commit()
 
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                graph.query("""
+                MATCH (m:Memory {id: $id, tenant_id: $tid})
+                SET m.status = $status, m.valid_to = COALESCE($valid_to, m.valid_to),
+                    m.superseded_by = COALESCE($superseded_by, m.superseded_by),
+                    m.version = m.version + 1, m.updated_at = $now
+                """, {"id": memory_id, "tid": context.tenant_id, "status": new_status, "valid_to": valid_to or "", "superseded_by": superseded_by or "", "now": now})
+            except Exception as e:
+                logger.warning(f"FalkorDB update_memory_status error: {e}")
+
         get_cache().invalidate_tenant(context.tenant_id)
         return self.get_memory(context, memory_id)
 
@@ -447,6 +735,16 @@ class MemoryRepository:
                 # Remove from FTS to prevent retrieval
                 cur.execute("DELETE FROM memory_fts WHERE memory_id = ? AND tenant_id = ?", (memory_id, context.tenant_id))
             con.commit()
+
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                if hard_delete:
+                    graph.query("MATCH (m:Memory {id: $id, tenant_id: $tid}) DETACH DELETE m", {"id": memory_id, "tid": context.tenant_id})
+                else:
+                    graph.query("MATCH (m:Memory {id: $id, tenant_id: $tid}) SET m.status = 'deleted', m.updated_at = $now", {"id": memory_id, "tid": context.tenant_id, "now": utc_now_iso()})
+            except Exception as e:
+                logger.warning(f"FalkorDB delete_memory error: {e}")
 
         get_cache().invalidate_tenant(context.tenant_id)
         return True
@@ -523,7 +821,27 @@ class MemoryRepository:
             ]
 
     def get_entity_dependencies(self, context: TenantContext, entity_id: str, hops: int = 2) -> List[EntityModel]:
-        """Traverse DEPENDS_ON relationships up to hops."""
+        """Traverse DEPENDS_ON relationships up to hops directly in FalkorDB."""
+        results = []
+        visited = set()
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                cypher = """
+                MATCH (e:Entity {id: $eid, tenant_id: $tenant_id})-[:DEPENDS_ON*1..2]-(dep:Entity {tenant_id: $tenant_id})
+                RETURN DISTINCT dep
+                """
+                res = graph.query(cypher, {"eid": entity_id, "tenant_id": context.tenant_id})
+                for row in res.result_set:
+                    ent = self._node_to_entity(row[0])
+                    if ent.id not in visited:
+                        visited.add(ent.id)
+                        results.append(ent)
+                if results:
+                    return results
+            except Exception as e:
+                logger.warning(f"FalkorDB get_entity_dependencies error: {e}")
+
         visited = set()
         queue = [(entity_id, 0)]
         results = []
@@ -577,9 +895,42 @@ class MemoryRepository:
                 task.attempts, task.version, task.created_at, task.updated_at
             ))
             con.commit()
+
+        # FalkorDB sync
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                cypher = """
+                MERGE (t:Task {id: $id, tenant_id: $tenant_id})
+                SET t.task_type = $task_type, t.status = $status, t.payload_json = $payload_json,
+                    t.result_json = $result_json, t.idempotency_key = $idemp,
+                    t.lease_owner = $lease_owner, t.lease_expires = $lease_expires,
+                    t.attempts = $attempts, t.version = $ver,
+                    t.created_at = $created_at, t.updated_at = $updated_at
+                RETURN t
+                """
+                graph.query(cypher, {
+                    "id": task.id, "tenant_id": task.tenant_id, "task_type": task.task_type,
+                    "status": task.status, "payload_json": task.payload_json,
+                    "result_json": task.result_json or "", "idemp": task.idempotency_key,
+                    "lease_owner": task.lease_owner or "", "lease_expires": task.lease_expires or "",
+                    "attempts": task.attempts, "ver": task.version,
+                    "created_at": task.created_at, "updated_at": task.updated_at
+                })
+            except Exception as e:
+                logger.warning(f"FalkorDB create_task error: {e}")
+
         return task
 
     def get_task(self, context: TenantContext, task_id: str) -> Optional[TaskModel]:
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                res = graph.query("MATCH (t:Task {id: $id, tenant_id: $tenant_id}) RETURN t", {"id": task_id, "tenant_id": context.tenant_id})
+                if res.result_set:
+                    return self._node_to_task(res.result_set[0][0])
+            except Exception:
+                pass
         with self._get_sqlite_con() as con:
             cur = con.cursor()
             cur.execute("SELECT * FROM tasks WHERE id = ? AND tenant_id = ?", (task_id, context.tenant_id))
@@ -604,48 +955,48 @@ class MemoryRepository:
         worker_id: str,
         lease_seconds: int = 30
     ) -> Optional[TaskModel]:
-        """
-        Atomic lease-based task claim.
-        Valid claim condition:
-          status = 'pending' AND (lease_owner IS NULL OR lease_expires < now)
-        """
+        """Atomic Cypher lease-based task claiming in FalkorDB."""
         from datetime import timedelta
         from app.core.time import utc_now
         lease_until = (utc_now() + timedelta(seconds=lease_seconds)).isoformat()
         now = utc_now_iso()
 
-        with self._get_sqlite_con() as con:
-            cur = con.cursor()
-            # We select first to verify tenant isolation and pending state
-            cur.execute("SELECT * FROM tasks WHERE id = ? AND tenant_id = ?", (task_id, context.tenant_id))
-            row = cur.fetchone()
-            if not row:
+        # 1. FalkorDB atomic single-roundtrip Cypher query
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                cypher = """
+                MATCH (t:Task {id: $task_id, tenant_id: $tenant_id})
+                WHERE t.status = 'pending' OR (t.status = 'claimed' AND t.lease_expires < $now)
+                SET t.status = 'claimed', t.lease_owner = $worker_id, t.lease_expires = $lease_expires,
+                    t.attempts = coalesce(t.attempts, 0) + 1, t.version = coalesce(t.version, 1) + 1,
+                    t.updated_at = $now
+                RETURN t
+                """
+                res = graph.query(cypher, {
+                    "task_id": task_id,
+                    "tenant_id": context.tenant_id,
+                    "worker_id": worker_id,
+                    "lease_expires": lease_until,
+                    "now": now
+                })
+                if res.result_set:
+                    claimed_task = self._node_to_task(res.result_set[0][0])
+                    # Update local DB if present
+                    with self._get_sqlite_con() as con:
+                        con.execute("""
+                            UPDATE tasks SET status = 'claimed', lease_owner = ?, lease_expires = ?, attempts = attempts + 1, updated_at = ?
+                            WHERE id = ? AND tenant_id = ?
+                        """, (worker_id, lease_until, now, task_id, context.tenant_id))
+                        con.commit()
+                    return claimed_task
+                else:
+                    return None
+            except Exception as e:
+                logger.warning(f"FalkorDB atomic claim error: {e}")
                 return None
 
-            # Check if pending or expired lease
-            is_claimable = (row["status"] == "pending") or (
-                row["status"] == "claimed" and row["lease_expires"] and is_past(row["lease_expires"])
-            )
-            if not is_claimable:
-                return None
-
-            cur.execute("""
-                UPDATE tasks
-                SET status = 'claimed',
-                    lease_owner = ?,
-                    lease_expires = ?,
-                    attempts = attempts + 1,
-                    version = version + 1,
-                    updated_at = ?
-                WHERE id = ? AND tenant_id = ? AND version = ?
-            """, (worker_id, lease_until, now, task_id, context.tenant_id, row["version"]))
-
-            if cur.rowcount == 0:
-                # Concurrent claim lost
-                return None
-            con.commit()
-
-        return self.get_task(context, task_id)
+        return None
 
     def complete_task(
         self,
@@ -655,6 +1006,24 @@ class MemoryRepository:
         result_json: str
     ) -> Optional[TaskModel]:
         now = utc_now_iso()
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                cypher = """
+                MATCH (t:Task {id: $task_id, tenant_id: $tenant_id})
+                WHERE t.lease_owner = $worker_id
+                SET t.status = 'done', t.result_json = $result_json,
+                    t.lease_owner = '', t.lease_expires = '',
+                    t.version = t.version + 1, t.updated_at = $now
+                RETURN t
+                """
+                graph.query(cypher, {
+                    "task_id": task_id, "tenant_id": context.tenant_id,
+                    "worker_id": worker_id, "result_json": result_json, "now": now
+                })
+            except Exception as e:
+                logger.warning(f"FalkorDB complete_task error: {e}")
+
         with self._get_sqlite_con() as con:
             cur = con.cursor()
             cur.execute("""
@@ -678,6 +1047,23 @@ class MemoryRepository:
         reason: str
     ) -> Optional[TaskModel]:
         now = utc_now_iso()
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                cypher = """
+                MATCH (t:Task {id: $task_id, tenant_id: $tenant_id})
+                SET t.status = 'failed', t.result_json = $result_json,
+                    t.lease_owner = '', t.lease_expires = '',
+                    t.version = t.version + 1, t.updated_at = $now
+                RETURN t
+                """
+                graph.query(cypher, {
+                    "task_id": task_id, "tenant_id": context.tenant_id,
+                    "result_json": json.dumps({"error": reason}), "now": now
+                })
+            except Exception as e:
+                logger.warning(f"FalkorDB fail_task error: {e}")
+
         with self._get_sqlite_con() as con:
             cur = con.cursor()
             cur.execute("""
@@ -764,13 +1150,128 @@ class MemoryRepository:
                 status=row["status"], created_at=row["created_at"], updated_at=row["updated_at"]
             )
 
+    def record_session_turn(
+        self,
+        context: TenantContext,
+        session_id: str,
+        turn_id: str,
+        role: str,
+        content: str,
+        memory_ids: Optional[List[str]] = None
+    ) -> None:
+        """Persist :Session and :Turn nodes with :HAS_TURN, :NEXT_TURN, and :DERIVED_FROM in FalkorDB."""
+        if not self._falkor_connected or not self._falkor_client:
+            return
+        try:
+            graph = self._get_graph(context.graph_name)
+            now = utc_now_iso()
+
+            # 1. Find previous turn in session to chain NEXT_TURN
+            prev_turn_res = graph.query("""
+                MATCH (s:Session {id: $session_id, tenant_id: $tenant_id})-[:HAS_TURN]->(t:Turn)
+                WHERE NOT (t)-[:NEXT_TURN]->()
+                RETURN t.id
+                ORDER BY t.created_at DESC
+                LIMIT 1
+            """, {"session_id": session_id, "tenant_id": context.tenant_id})
+            prev_turn_id = prev_turn_res.result_set[0][0] if prev_turn_res.result_set else None
+
+            # 2. Merge session, create turn, merge HAS_TURN
+            cypher = """
+            MERGE (s:Session {id: $session_id, tenant_id: $tenant_id})
+            ON CREATE SET s.created_at = $now
+            SET s.updated_at = $now
+            CREATE (t:Turn {id: $turn_id, session_id: $session_id, role: $role, content: $content, created_at: $now})
+            MERGE (s)-[:HAS_TURN]->(t)
+            """
+            graph.query(cypher, {
+                "session_id": session_id,
+                "tenant_id": context.tenant_id,
+                "turn_id": turn_id,
+                "role": role,
+                "content": content,
+                "now": now
+            })
+
+            # 3. Chain :NEXT_TURN edge
+            if prev_turn_id and prev_turn_id != turn_id:
+                graph.query("""
+                MATCH (t_prev:Turn {id: $prev_id, session_id: $session_id}), (t_curr:Turn {id: $curr_id, session_id: $session_id})
+                MERGE (t_prev)-[:NEXT_TURN]->(t_curr)
+                """, {"prev_id": prev_turn_id, "curr_id": turn_id, "session_id": session_id})
+
+            # 4. Link extracted memories via (:Memory)-[:DERIVED_FROM]->(:Turn)
+            if memory_ids:
+                for mid in memory_ids:
+                    graph.query("""
+                    MATCH (m:Memory {id: $mid, tenant_id: $tenant_id}), (t:Turn {id: $turn_id})
+                    MERGE (m)-[:DERIVED_FROM]->(t)
+                    """, {"mid": mid, "tenant_id": context.tenant_id, "turn_id": turn_id})
+        except Exception as e:
+            logger.warning(f"FalkorDB record_session_turn error: {e}")
+
+    def record_agent_handoff(
+        self,
+        context: TenantContext,
+        from_agent: str,
+        to_agent: str,
+        task_id: str,
+        reason: str,
+        shared_state: Optional[Dict[str, Any]] = None,
+        memory_id: Optional[str] = None
+    ) -> None:
+        """Persist explicit multi-agent handoff edge in FalkorDB."""
+        if not self._falkor_connected or not self._falkor_client:
+            return
+        try:
+            graph = self._get_graph(context.graph_name)
+            now = utc_now_iso()
+            state_json = json.dumps(shared_state or {})
+
+            # 1. Ensure agents exist
+            graph.query("""
+            MERGE (:Agent {id: $from_id, tenant_id: $tenant_id})
+            MERGE (:Agent {id: $to_id, tenant_id: $tenant_id})
+            """, {"from_id": from_agent, "to_id": to_agent, "tenant_id": context.tenant_id})
+
+            # 2. Record HANDED_OFF_TO edge
+            handoff_cypher = """
+            MATCH (a1:Agent {id: $from_id, tenant_id: $tenant_id}), (a2:Agent {id: $to_id, tenant_id: $tenant_id})
+            CREATE (a1)-[h:HANDED_OFF_TO {task_id: $task_id, reason: $reason, shared_state_json: $state, timestamp: $now}]->(a2)
+            RETURN h
+            """
+            graph.query(handoff_cypher, {
+                "from_id": from_agent,
+                "to_id": to_agent,
+                "task_id": task_id,
+                "reason": reason,
+                "state": state_json,
+                "now": now,
+                "tenant_id": context.tenant_id
+            })
+
+            # 3. Link ASSIGNED_TO and FOR if task_id / memory_id present
+            if task_id:
+                graph.query("""
+                MATCH (a:Agent {id: $agent_id, tenant_id: $tenant_id}), (t:Task {id: $task_id, tenant_id: $tenant_id})
+                MERGE (a)-[:ASSIGNED_TO]->(t)
+                """, {"agent_id": to_agent, "task_id": task_id, "tenant_id": context.tenant_id})
+
+            if task_id and memory_id:
+                graph.query("""
+                MATCH (t:Task {id: $task_id, tenant_id: $tenant_id}), (m:Memory {id: $mem_id, tenant_id: $tenant_id})
+                MERGE (t)-[:FOR]->(m)
+                """, {"task_id": task_id, "mem_id": memory_id, "tenant_id": context.tenant_id})
+        except Exception as e:
+            logger.warning(f"FalkorDB agent handoff error: {e}")
+
     # ==========================
     # FTS Retrieval & Rebuild
     # ==========================
     def search_fts(self, context: TenantContext, query: str, limit: int = 20) -> List[Tuple[MemoryModel, float]]:
-        """Search derived SQLite FTS5 index filtered by tenant."""
+        """Search native FalkorDB fulltext index filtered by tenant."""
         results = []
-        # Sanitize query for FTS5 (avoid syntax errors on special characters)
+        # Sanitize query for RediSearch (avoid syntax errors on special characters)
         clean_terms = "".join(c if c.isalnum() or c.isspace() else " " for c in query).strip()
         if not clean_terms:
             return []
@@ -787,35 +1288,71 @@ class MemoryRepository:
         if not filtered_terms:
             return []
 
-        match_expression = " OR ".join(f'"{term}"*' for term in filtered_terms)
-
-        with self._get_sqlite_con() as con:
-            cur = con.cursor()
+        # 1. FalkorDB Native RediSearch fulltext index query
+        if self._falkor_connected and self._falkor_client:
             try:
-                cur.execute("""
-                    SELECT memory_id, bm25(memory_fts) as rank
-                    FROM memory_fts
-                    WHERE tenant_id = ? AND memory_fts MATCH ?
-                    ORDER BY rank ASC
-                    LIMIT ?
-                """, (context.tenant_id, match_expression, limit))
-                rows = cur.fetchall()
-            except sqlite3.OperationalError:
-                # Fallback to LIKE if syntax issue
-                cur.execute("""
-                    SELECT id as memory_id, 1.0 as rank
-                    FROM memories
-                    WHERE tenant_id = ? AND (title LIKE ? OR summary LIKE ?)
-                    LIMIT ?
-                """, (context.tenant_id, f"%{clean_terms}%", f"%{clean_terms}%", limit))
-                rows = cur.fetchall()
+                graph = self._get_graph(context.graph_name)
+                fts_query = " | ".join(filtered_terms)
+                cypher = """
+                CALL db.idx.fulltext.queryNodes('Memory', $fts_query) YIELD node, score
+                WHERE node.tenant_id = $tenant_id AND (node.status IS NULL OR node.status <> 'deleted')
+                RETURN node, score
+                LIMIT $limit
+                """
+                res = graph.query(cypher, {
+                    "fts_query": fts_query,
+                    "tenant_id": context.tenant_id,
+                    "limit": limit
+                })
+                for row in res.result_set:
+                    mem = self._node_to_memory(row[0])
+                    raw_score = float(row[1]) if row[1] is not None else 1.0
+                    norm_score = max(0.01, min(1.0, raw_score / 2.0))
+                    results.append((mem, norm_score))
+                return results
+            except Exception as e:
+                logger.warning(f"FalkorDB fulltext query error: {e}")
 
-            for r in rows:
-                mem = self.get_memory(context, r["memory_id"])
-                if mem and mem.status != "deleted":
-                    # In FTS5, lower BM25 score means better match; invert for standard scoring
-                    score = 1.0 / (1.0 + abs(float(r["rank"])))
-                    results.append((mem, score))
+        return results
+
+    def search_vector(
+        self,
+        context: TenantContext,
+        query: str,
+        limit: int = 10
+    ) -> List[Tuple[MemoryModel, float]]:
+        """Native FalkorDB vector similarity search using deterministic 64-dim embeddings."""
+        from app.retrieval.vector_encoder import encode_vector
+        query_vec = encode_vector(query)
+        results: List[Tuple[MemoryModel, float]] = []
+
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                # FalkorDB cosine distance score: 0 is identical, so similarity is 1.0 - score
+                cypher = """
+                CALL db.idx.vector.queryNodes('Memory', 'embedding', $k, vecf32($vec)) YIELD node, score
+                WHERE node.tenant_id = $tenant_id AND (node.status IS NULL OR node.status <> 'deleted')
+                RETURN node, score
+                """
+                res = graph.query(cypher, {
+                    "k": limit * 2,
+                    "vec": query_vec,
+                    "tenant_id": context.tenant_id
+                })
+                for row in res.result_set:
+                    mem = self._node_to_memory(row[0])
+                    dist = float(row[1]) if row[1] is not None else 1.0
+                    sim = max(0.01, min(1.0, 1.0 - dist))
+                    if sim < 0.28:
+                        continue
+                    results.append((mem, sim))
+                    if len(results) >= limit:
+                        break
+                return results
+            except Exception as e:
+                logger.warning(f"FalkorDB vector query error: {e}")
+
         return results
 
     def rebuild_fts(self) -> int:
@@ -878,6 +1415,100 @@ class MemoryRepository:
             created_at=row["created_at"],
             updated_at=row["updated_at"]
         )
+
+    def get_recent_handoffs(self, context: TenantContext, limit: int = 10) -> List[Dict[str, Any]]:
+        """Retrieve recent agent handoffs from FalkorDB."""
+        handoffs: List[Dict[str, Any]] = []
+        if self._falkor_connected and self._falkor_client:
+            try:
+                graph = self._get_graph(context.graph_name)
+                cypher = """
+                MATCH (a1:Agent)-[h:HANDED_OFF_TO]->(a2:Agent)
+                WHERE a1.tenant_id = $tenant_id
+                RETURN a1.id, a2.id, h.task_id, h.reason, h.shared_state_json, h.timestamp
+                ORDER BY h.timestamp DESC
+                LIMIT $limit
+                """
+                res = graph.query(cypher, {"tenant_id": context.tenant_id, "limit": limit})
+                for row in res.result_set:
+                    try:
+                        state = json.loads(row[4]) if row[4] else {}
+                    except Exception:
+                        state = {}
+                    handoffs.append({
+                        "from_agent": row[0],
+                        "to_agent": row[1],
+                        "task_id": row[2],
+                        "reason": row[3],
+                        "shared_state": state,
+                        "timestamp": row[5]
+                    })
+            except Exception as e:
+                logger.warning(f"Error fetching handoffs from FalkorDB: {e}")
+        return handoffs
+
+    def get_graph_context(self, context: TenantContext) -> Dict[str, Any]:
+        """Inspect live FalkorDB graph state: active nodes, edges, turns, handoffs, and indexes."""
+        context_data: Dict[str, Any] = {
+            "tenant_id": context.tenant_id,
+            "graph_name": context.graph_name,
+            "falkordb_connected": self._falkor_connected,
+            "node_counts": {},
+            "edge_counts": {},
+            "recent_turns": [],
+            "agent_handoffs": [],
+            "indexes": []
+        }
+        if not (self._falkor_connected and self._falkor_client):
+            return context_data
+
+        try:
+            graph = self._get_graph(context.graph_name)
+            # 1. Node counts by label
+            lbl_res = graph.query("MATCH (n) WHERE n.tenant_id = $tenant_id RETURN labels(n), count(n)", {"tenant_id": context.tenant_id})
+            for row in lbl_res.result_set:
+                lbls, cnt = row[0], row[1]
+                lbl_name = lbls[0] if isinstance(lbls, list) and lbls else str(lbls)
+                context_data["node_counts"][lbl_name] = cnt
+
+            # 2. Edge counts by relationship type
+            edge_res = graph.query("MATCH (n1)-[r]->(n2) WHERE n1.tenant_id = $tenant_id RETURN type(r), count(r)", {"tenant_id": context.tenant_id})
+            for row in edge_res.result_set:
+                context_data["edge_counts"][row[0]] = row[1]
+
+            # 3. Recent turns
+            turn_res = graph.query("""
+            MATCH (s:Session {tenant_id: $tenant_id})-[:HAS_TURN]->(t:Turn)
+            RETURN s.id, t.id, t.role, t.content, t.created_at
+            ORDER BY t.created_at DESC
+            LIMIT 10
+            """, {"tenant_id": context.tenant_id})
+            for row in turn_res.result_set:
+                context_data["recent_turns"].append({
+                    "session_id": row[0],
+                    "turn_id": row[1],
+                    "role": row[2],
+                    "content": row[3],
+                    "created_at": row[4]
+                })
+
+            # 4. Agent handoffs
+            context_data["agent_handoffs"] = self.get_recent_handoffs(context, limit=10)
+
+            # 5. Indexes
+            idx_res = graph.query("CALL db.indexes()")
+            for row in idx_res.result_set:
+                context_data["indexes"].append({
+                    "label": row[0],
+                    "properties": row[1],
+                    "types": dict(row[2]) if hasattr(row[2], "items") else row[2],
+                    "status": row[7] if len(row) > 7 else "UNKNOWN"
+                })
+        except Exception as e:
+            logger.warning(f"Error fetching graph context from FalkorDB: {e}")
+            context_data["error"] = str(e)
+
+        return context_data
 
 
 _repo: Optional[MemoryRepository] = None

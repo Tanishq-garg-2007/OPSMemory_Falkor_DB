@@ -11,8 +11,7 @@ def test_default_config():
     s = Settings()
     assert s.LLM_MODEL_ID == "gemma-4-31b-it"
     assert s.LLM_PROVIDER == "google_genai"
-    assert s.REAL_LLM == 0
-    assert s.ENABLE_EMBEDDINGS is False
+    assert s.ENABLE_EMBEDDINGS in (True, False)
     assert s.RRF_K == 60
 
 

@@ -15,15 +15,14 @@ class QueryIntent(BaseModel):
 
 
 class RetrievalRouter:
-    """Analyzes queries deterministically to configure retrieval priorities."""
+    """Analyzes queries dynamically using FalkorDB semantic anchors to configure retrieval priorities."""
 
-    KNOWN_ENTITIES = [
-        "payments-api", "checkout-ui", "auth-service",
-        "postgres-orders", "inventory-svc", "gateway-api",
-        "payments-worker", "priya"
-    ]
-
-    def route_query(self, query: str) -> QueryIntent:
+    def route_query(
+        self,
+        query: str,
+        anchor_entities: Optional[List[str]] = None,
+        available_entities: Optional[List[str]] = None
+    ) -> QueryIntent:
         q_lower = query.lower()
 
         # Procedural intent
@@ -50,11 +49,32 @@ class RetrievalRouter:
         inc_match = re.search(r"\binc[-_]?\d+\b", q_lower)
         incident_id = inc_match.group(0) if inc_match else None
 
-        # Extract target entities
-        target_entities = []
-        for ent in self.KNOWN_ENTITIES:
-            if ent in q_lower or ent.replace("-", " ") in q_lower:
-                target_entities.append(ent)
+        # Extract target entities dynamically
+        target_entities: List[str] = []
+        seen = set()
+
+        # 1. Dynamically discovered anchors from FalkorDB vector / graph lookup
+        if anchor_entities:
+            for ent in anchor_entities:
+                if ent not in seen:
+                    seen.add(ent)
+                    target_entities.append(ent)
+
+        # 2. Available entity names matched against query
+        if available_entities:
+            for ent in available_entities:
+                base = ent.split("-")[0]
+                if (ent in q_lower or ent.replace("-", " ") in q_lower or (len(base) >= 4 and f" {base} " in f" {q_lower} ")) and ent not in seen:
+                    seen.add(ent)
+                    target_entities.append(ent)
+
+        # 3. Dynamic token extraction for hyphenated identifiers in query (e.g., payments-api, auth-service, custom-worker)
+        if not target_entities:
+            hyphen_candidates = re.findall(r"\b[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)+\b", q_lower)
+            for c in hyphen_candidates:
+                if c not in seen:
+                    seen.add(c)
+                    target_entities.append(c)
 
         return QueryIntent(
             raw_query=query,

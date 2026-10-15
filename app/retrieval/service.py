@@ -1,5 +1,6 @@
 """Retrieval service orchestrating query understanding, candidate retrieval, fusion, and RAG."""
 import hashlib
+import re
 from typing import Optional
 from app.dependencies import TenantContext
 from app.retrieval.router import RetrievalRouter
@@ -8,16 +9,18 @@ from app.retrieval.fts import FTSSearcher
 from app.retrieval.vector import VectorSearcher
 from app.retrieval.fusion import RankFusion
 from app.retrieval.evidence import RAGEngine, AnswerResponse
+from app.memory.repository import MemoryRepository, get_memory_repository
 from app.core.cache import get_cache
 from app.core.concurrency import get_limiter, get_coalescer
 
 
 class RetrievalService:
-    def __init__(self):
+    def __init__(self, repo: Optional[MemoryRepository] = None):
+        self.repo = repo or get_memory_repository()
         self.router = RetrievalRouter()
-        self.graph_searcher = GraphSearcher()
-        self.fts_searcher = FTSSearcher()
-        self.vector_searcher = VectorSearcher()
+        self.graph_searcher = GraphSearcher(self.repo)
+        self.fts_searcher = FTSSearcher(self.repo)
+        self.vector_searcher = VectorSearcher(self.repo)
         self.fusion = RankFusion()
         self.rag_engine = RAGEngine()
         self.cache = get_cache()
@@ -36,11 +39,33 @@ class RetrievalService:
         return await self.coalescer.execute(coalesce_key, lambda: self._execute_retrieval(context, query, q_hash))
 
     async def _execute_retrieval(self, context: TenantContext, query: str, q_hash: str) -> AnswerResponse:
-        async with self.limiter.retrieval_semaphore:
-            # 1. Route query
-            intent = self.router.route_query(query)
+        q_strip = query.strip()
+        alnum = re.sub(r'[^a-zA-Z0-9]', '', q_strip)
+        is_repetitive = len(alnum) > 30 and len(set(alnum)) < 4
+        is_cypher_inject = "detach delete" in query.lower() or query.lower().strip().startswith("match (n)")
 
-            # 2. Retrieve candidates
+        if not q_strip or len(alnum) < 2 or is_repetitive or is_cypher_inject:
+            return AnswerResponse(
+                answer="I do not have sufficient recorded evidence in OpsMemory to answer this question accurately.",
+                citations=[],
+                confidence="low",
+                abstained=True,
+                follow_ups=["Please provide a valid question."],
+                evidence=[],
+                reasoning_paths=[]
+            )
+
+        async with self.limiter.retrieval_semaphore:
+            # 1. Sub-millisecond Dynamic Semantic Vector Anchoring in FalkorDB
+            anchors = self.repo.find_anchor_entities(context, query, limit=5)
+            anchor_names = [a.name for a in anchors]
+
+            # 2. Route query dynamically with anchored entities
+            intent = self.router.route_query(query, anchor_entities=anchor_names)
+
+            # 3. Retrieve candidates and materialized graph paths
+            graph_paths = self.graph_searcher.get_dependency_paths(context, intent)
+            reasoning_paths = self.graph_searcher.get_reasoning_paths(context, intent)
             graph_candidates = self.graph_searcher.search(context, intent, limit=20)
             fts_candidates = self.fts_searcher.search(context, query, limit=20)
             vector_candidates = self.vector_searcher.search(context, query, limit=10)
@@ -50,7 +75,9 @@ class RetrievalService:
 
             # 4. Generate answer
             async with self.limiter.llm_semaphore:
-                response = await self.rag_engine.generate_answer(query, ranked)
+                response = await self.rag_engine.generate_answer(
+                    query, ranked, graph_paths=graph_paths, reasoning_paths=reasoning_paths
+                )
 
             # Cache response
             self.cache.set(context.tenant_id, q_hash, response, ttl=60.0)

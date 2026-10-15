@@ -37,6 +37,11 @@ async def run_benchmark(
     print(f"OpsMemory Benchmark Suite: {suite.upper()} (REAL_LLM={1 if real_llm else 0})")
     print(f"================================================================")
 
+    from app.config import get_settings
+    from app.llm import reset_llm_client
+    get_settings().REAL_LLM = 1 if real_llm else 0
+    reset_llm_client()
+
     repo = get_memory_repository()
     coordinator = get_coordinator()
 

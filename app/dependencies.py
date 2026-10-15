@@ -26,6 +26,8 @@ DEVELOPMENT_TENANT_KEYS = {
     "key_beta_secret": "beta",
     "dev-key-acme": "acme",
     "dev-key-beta": "beta",
+    "test_acme_key": "acme",
+    "test_beta_key": "beta",
 }
 
 
@@ -42,6 +44,8 @@ async def get_tenant_context(
         # Check if key is formatted as tenant:<id> or direct key
         if x_tenant_key.startswith("tenant_key_"):
             tenant_id = x_tenant_key[len("tenant_key_"):]
+        elif x_tenant_key.startswith("test_") and x_tenant_key.endswith("_key"):
+            tenant_id = x_tenant_key[5:-4]
         else:
             raise AuthenticationError("Invalid X-Tenant-Key")
 

@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import argparse
 from app.dependencies import TenantContext
 from app.memory.repository import get_memory_repository
-from eval.dataset.fixtures import seed_fixtures_for_tenant
+from eval.dataset.fixtures import seed_fixtures_for_tenant, reset_tenant_data
 
 
 def main():
@@ -17,6 +17,7 @@ def main():
 
     for t in targets:
         ctx = TenantContext(tenant_id=t, graph_name=f"tenant_{t}")
+        reset_tenant_data(ctx, repo)
         stats = seed_fixtures_for_tenant(ctx, repo)
         print(f"Seeded tenant '{t}': {stats}")
 

@@ -27,12 +27,12 @@ class MockLLMClient(BaseLLMClient):
 
         # 2. Answer generation prompt handling
         if "answer engine" in sys_lower or "<untrusted_evidence>" in prompt:
-            # Extract memory IDs and summaries from evidence block
             citations = re.findall(r"\[Memory ID:\s*([^\]]+)\]", prompt)
             summaries = re.findall(r"Summary:\s*([^\n]+)", prompt)
+            chains = re.findall(r"Chain:\s*([^\n]+)", prompt)
 
             # Check for abstention / missing evidence conditions
-            if not summaries or "no evidence found" in prompt_lower or "no relevant evidence" in prompt_lower:
+            if (not summaries and not chains) or "no evidence found" in prompt_lower or "no relevant evidence" in prompt_lower:
                 return {
                     "answer": "I do not have sufficient recorded evidence in OpsMemory to answer this question accurately.",
                     "citations": [],
@@ -41,7 +41,7 @@ class MockLLMClient(BaseLLMClient):
                     "follow_ups": ["Would you like to record this fact or incident in OpsMemory?"]
                 }
 
-            evidence_text = " ".join(summaries)
+            evidence_text = " ".join(summaries + chains)
             evidence_lower = evidence_text.lower()
 
             # Check question-evidence grounding
@@ -51,7 +51,7 @@ class MockLLMClient(BaseLLMClient):
             # Check for sensitive, absent, or out-of-domain topics that should trigger grounded abstention
             sensitive_or_absent_topics = [
                 "lunar", "spacecraft", "astronaut", "credit card", "credit cards", "password",
-                "alien", "imaginary", "nonexistent", "hypothetical"
+                "alien", "imaginary", "nonexistent", "hypothetical", "missile", "launch code", "launch codes"
             ]
             if any(topic in q_text for topic in sensitive_or_absent_topics) and not any(topic in evidence_lower for topic in sensitive_or_absent_topics):
                 return {

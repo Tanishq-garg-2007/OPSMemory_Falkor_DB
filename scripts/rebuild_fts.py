@@ -5,10 +5,10 @@ from app.memory.repository import get_memory_repository
 
 
 def main():
-    print("Rebuilding SQLite FTS5 index...")
+    print("Verifying FalkorDB native full-text and vector indexes...")
     repo = get_memory_repository()
-    count = repo.rebuild_fts()
-    print(f"Successfully rebuilt FTS5 index. Indexed {count} active memories.")
+    status = repo.health_check()
+    print(f"FalkorDB native persistence verified: mode={status.get('mode')}, falkordb_connected={status.get('falkordb_connected')}")
     return 0
 
 

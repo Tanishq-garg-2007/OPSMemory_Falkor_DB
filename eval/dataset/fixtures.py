@@ -480,7 +480,16 @@ def seed_fixtures_for_tenant(context: TenantContext, repo: Optional[MemoryReposi
 
 def reset_tenant_data(context: TenantContext, repo: Optional[MemoryRepository] = None) -> int:
     r = repo or get_memory_repository()
-    # Delete all memories, tasks, entities, and sources for tenant
+    # Clean FalkorDB tenant graph
+    if getattr(r, "_falkor_connected", False) and r._falkor_client:
+        try:
+            graph = r._get_graph(context.graph_name)
+            graph.query("MATCH (n {tenant_id: $tenant_id}) DETACH DELETE n", {"tenant_id": context.tenant_id})
+            r.init_tenant_schema(context.tenant_id)
+        except Exception:
+            pass
+
+    # Delete all memories, tasks, entities, and sources for tenant in SQLite
     count = 0
     with r._get_sqlite_con() as con:
         cur = con.cursor()

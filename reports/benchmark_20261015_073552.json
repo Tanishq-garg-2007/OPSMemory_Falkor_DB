@@ -1,0 +1,348 @@
+{
+  "timestamp": "20261015_073552",
+  "suite": "hard",
+  "real_llm": true,
+  "summary": {
+    "total_cases": 22,
+    "passed": 15,
+    "failed": 7,
+    "accuracy_pct": 68.18,
+    "walltime_sec": 823.661,
+    "p50_latency_sec": 32.5811,
+    "p95_latency_sec": 239.7234,
+    "estimated_cost_usd": 0.0
+  },
+  "by_difficulty": {
+    "hard": {
+      "total": 22,
+      "passed": 15,
+      "accuracy": 68.2,
+      "p50_ms": 32581.1,
+      "p95_ms": 239723.4
+    }
+  },
+  "results": [
+    {
+      "case_id": "hard_01",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 2,
+      "answer_sample": "The dependency chain starting from checkout-ui down to the database layer is: checkout-ui -> payments-api -> postgres-or",
+      "latency_sec": 61.76433320000069,
+      "input": "Trace the full dependency chain starting from checkout-ui down to the database layer.",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_02",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 3,
+      "answer_sample": "inc-101 occurred on 2026-09-15 due to connection pool exhaustion following an upgrade of payments-api to v2.3, which res",
+      "latency_sec": 35.769554000056814,
+      "input": "Explain how inc-101 occurred, how it was resolved, and what version payments-api is on today.",
+      "expected_behavior": "correction_handling"
+    },
+    {
+      "case_id": "hard_03",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 2,
+      "answer_sample": "The immediate rollback steps for payments-api are: 1) Set canary traffic to 0%; 2) Deploy the previous stable tag via 'h",
+      "latency_sec": 111.47665239998605,
+      "input": "A deployment of payments-api causes immediate database errors. Synthesize the immediate rollback steps and escalation timeline.",
+      "expected_behavior": "procedural_recall"
+    },
+    {
+      "case_id": "hard_04",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 4,
+      "answer_sample": "No, payments-api is not currently running v2.3; the current production version is v2.4 (mem_semantic_acme_fact_payments-",
+      "latency_sec": 58.60487409995403,
+      "input": "Is payments-api currently running v2.3, and why was that changed?",
+      "expected_behavior": "correction_handling"
+    },
+    {
+      "case_id": "hard_05",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 1,
+      "answer_sample": "According to dependency records, the two backend services that checkout-ui directly depends on, which could be primary r",
+      "latency_sec": 14.137975400022697,
+      "input": "If checkout-ui is reporting errors, which two backend services could be the primary root causes according to dependency records?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_06",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 3,
+      "answer_sample": "The rollback to v2.2 was decided upon following incident inc-101, which resulted in checkout failures due to connection ",
+      "latency_sec": 36.14001299999654,
+      "input": "What prior incident outcome led to the rollback to v2.2 and who owns the affected auth dependency?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_07",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 4,
+      "answer_sample": "The operational profile for payments-api is as follows:\n- Current version: v2.4 [mem_semantic_acme_fact_payments-api-cur",
+      "latency_sec": 96.70250020001549,
+      "input": "Provide the complete operational profile for payments-api: current version, database dependency, rollback procedure, and escalation threshold.",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_08",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 2,
+      "answer_sample": "Queries about current facts should not cite the v2.3 memory as active because that memory (mem_semantic_acme_fact_paymen",
+      "latency_sec": 22.52697010000702,
+      "input": "Why should queries about current facts not cite the v2.3 memory as active?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_09",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 2,
+      "answer_sample": "A release at 03:00 UTC on Sunday does not violate maintenance windows, as the standard production maintenance window is ",
+      "latency_sec": 32.581085000012536,
+      "input": "If a release happens on Sunday at 03:00 UTC and fails, does it violate maintenance windows and what runbook applies?",
+      "expected_behavior": "procedural_recall"
+    },
+    {
+      "case_id": "hard_10",
+      "difficulty": "hard",
+      "passed": false,
+      "abstained": true,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": true,
+      "failure_reasons": [
+        "Missing expected terms: ['payments-api', 'payments-worker']"
+      ],
+      "citations_count": 0,
+      "answer_sample": "OpsMemory does not have verified evidence for this question.",
+      "latency_sec": 22.000597700010985,
+      "input": "What is the difference in ownership and version between payments-api in Acme and payments-worker?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_11",
+      "difficulty": "hard",
+      "passed": false,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [
+        "Missing expected terms: ['connection pool']"
+      ],
+      "citations_count": 1,
+      "answer_sample": "Based on persistent records: Engineering leadership decided to rollback payments-api to v2.2 after inc-101 to immediatel",
+      "latency_sec": 195.8394580000313,
+      "input": "Connect the causal link from payments-api v2.3 deployment to customer checkout failure and subsequent rollback.",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_12",
+      "difficulty": "hard",
+      "passed": false,
+      "abstained": true,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": true,
+      "failure_reasons": [
+        "Missing expected terms: ['payments-api']"
+      ],
+      "citations_count": 0,
+      "answer_sample": "OpsMemory does not have verified evidence for this question.",
+      "latency_sec": 248.52810999995563,
+      "input": "Verify whether auth-service was superseded or rolled back during inc-101.",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_13",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 1,
+      "answer_sample": "If an incident is declared on payments-api at 14:00, leadership (specifically the engineering VP and payments on-call le",
+      "latency_sec": 26.161217299988493,
+      "input": "If an incident is declared on payments-api at 14:00, by what time must leadership be escalated if unresolved?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_14",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 2,
+      "answer_sample": "The known dependencies of checkout-ui are as follows:\n- Direct dependencies: auth-service and payments-api\n- Indirect de",
+      "latency_sec": 20.380027000035625,
+      "input": "What are all known dependencies of checkout-ui direct and indirect?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_15",
+      "difficulty": "hard",
+      "passed": false,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [
+        "Missing expected terms: ['concise summaries']"
+      ],
+      "citations_count": 1,
+      "answer_sample": "If payments-api fails again, an incident review summary for Priya should be formatted as a concise summary using direct ",
+      "latency_sec": 16.896564299997408,
+      "input": "How should an incident review summary be formatted for Priya if payments-api fails again?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_16",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 1,
+      "answer_sample": "Following inc-101, there is an active unresolved task on the task board to migrate the postgres-orders connection pool t",
+      "latency_sec": 18.942030099977273,
+      "input": "Identify any unresolved tasks regarding database stability following inc-101.",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_17",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 3,
+      "answer_sample": "Historical evidence indicates that payments-api was at version v2.3 at multiple points: an upgrade to v2.3 occurred on 2",
+      "latency_sec": 59.18655609997222,
+      "input": "What is the historical evidence that payments-api was once at v2.3?",
+      "expected_behavior": "temporal_handling"
+    },
+    {
+      "case_id": "hard_18",
+      "difficulty": "hard",
+      "passed": false,
+      "abstained": true,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": true,
+      "failure_reasons": [
+        "Missing expected terms: ['payments-api']"
+      ],
+      "citations_count": 0,
+      "answer_sample": "OpsMemory does not have verified evidence for this question.",
+      "latency_sec": 24.065527700004168,
+      "input": "Does postgres-orders have any upstream dependents other than payments-api in Acme?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_19",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 2,
+      "answer_sample": "In the Beta environment, the payments-api is running version v1.9 and is owned by Team Billing Beta.",
+      "latency_sec": 16.075166400056332,
+      "input": "Contrast the version of payments-api in Beta with its documented ownership.",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_20",
+      "difficulty": "hard",
+      "passed": false,
+      "abstained": true,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": true,
+      "failure_reasons": [
+        "Missing expected terms: ['inc-beta-01', 'Team Billing Beta']"
+      ],
+      "citations_count": 0,
+      "answer_sample": "OpsMemory does not have verified evidence for this question.",
+      "latency_sec": 27.445638500037603,
+      "input": "What caused latency in Beta payments-api and which team investigated it?",
+      "expected_behavior": "answer"
+    },
+    {
+      "case_id": "hard_21",
+      "difficulty": "hard",
+      "passed": false,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [
+        "Missing expected terms: ['healthz']"
+      ],
+      "citations_count": 1,
+      "answer_sample": "Following a rollback of payments-api via helm, the mandatory next step is to run a database migration rollback check.",
+      "latency_sec": 17.715593899949454,
+      "input": "If payments-api is rolled back via helm, what is the mandatory next verification step?",
+      "expected_behavior": "procedural_recall"
+    },
+    {
+      "case_id": "hard_22",
+      "difficulty": "hard",
+      "passed": true,
+      "abstained": false,
+      "appropriate_abstention": false,
+      "inappropriate_abstention": false,
+      "failure_reasons": [],
+      "citations_count": 3,
+      "answer_sample": "During incident inc-101, the payments-api was running version v2.3, which resulted in checkout failures due to connectio",
+      "latency_sec": 239.7233816999942,
+      "input": "Compare the current version of payments-api with its version during inc-101.",
+      "expected_behavior": "correction_handling"
+    }
+  ]
+}

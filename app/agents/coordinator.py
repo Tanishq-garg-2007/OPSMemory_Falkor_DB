@@ -24,6 +24,8 @@ class ChatResponse(BaseModel):
     tasks: List[Dict[str, Any]] = Field(default_factory=list)
     abstained: bool = False
     confidence: str = "medium"
+    reasoning_paths: List[List[str]] = Field(default_factory=list)
+    agent_handoffs: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class Coordinator:
@@ -62,12 +64,24 @@ class Coordinator:
             )
             self.repo.save_conversation(context, conv)
 
+        user_turn_id = f"turn_{uuid.uuid4().hex[:12]}"
+
         # 2. Triage & Extraction: capture episodic/semantic/procedural memories
         triage_res = await self.triage_agent.triage_message(
             context=context,
             message=message,
             conversation_id=effective_conv_id,
             message_id=msg_id
+        )
+
+        created_memories = [m.id for m in triage_res.get("created_memories", [])]
+        self.repo.record_session_turn(
+            context=context,
+            session_id=effective_conv_id,
+            turn_id=user_turn_id,
+            role="user",
+            content=message,
+            memory_ids=created_memories
         )
 
         created_tasks = triage_res["created_tasks"]
@@ -93,7 +107,17 @@ class Coordinator:
         # 4. Retrieval & RAG response generation
         rag_response = await self.retrieval_service.retrieve_and_answer(context, message)
 
+        asst_turn_id = f"turn_{uuid.uuid4().hex[:12]}"
+        self.repo.record_session_turn(
+            context=context,
+            session_id=effective_conv_id,
+            turn_id=asst_turn_id,
+            role="assistant",
+            content=rag_response.answer
+        )
+
         # 5. Pack final response
+        recent_handoffs = self.repo.get_recent_handoffs(context, limit=10)
         return ChatResponse(
             conversation_id=effective_conv_id,
             answer=rag_response.answer,
@@ -101,7 +125,9 @@ class Coordinator:
             evidence=[e.model_dump() for e in rag_response.evidence],
             tasks=resolved_task_info,
             abstained=rag_response.abstained,
-            confidence=rag_response.confidence
+            confidence=rag_response.confidence,
+            reasoning_paths=rag_response.reasoning_paths,
+            agent_handoffs=recent_handoffs
         )
 
 

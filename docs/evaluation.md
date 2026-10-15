@@ -1,6 +1,6 @@
 # OpsMemory Evaluation & Benchmark Methodology
 
-OpsMemory includes an extensive, repeatable, ground-truth-based benchmark suite consisting of 88 distinct test cases designed to test persistent retrieval, multi-hop reasoning, temporal supersession, multi-tenant isolation, and prompt injection defense.
+OpsMemory includes an extensive, repeatable, ground-truth-based benchmark suite consisting of 88 distinct test cases designed to test persistent retrieval, multi-hop reasoning, temporal supersession, multi-tenant isolation, and prompt injection defense over **FalkorDB**.
 
 ---
 
@@ -29,8 +29,8 @@ Each test case is evaluated against deterministic ground truth:
    - `isolation_violation`: Asserts that tenant B cannot access tenant A's private data.
    - `contains_none`: Asserts answer does not contain forbidden injected data.
 2. **Latency (p50 & p95)**: End-to-end request latency measured in milliseconds.
-3. **Citations & Grounding**: Citations returned from retrieved evidence memories.
-4. **Appropriate vs Inappropriate Abstentions**: Verified against expected behavior.
+3. **Citations & Grounding**: Citations returned from retrieved evidence memories in FalkorDB.
+4. **Reasoning Path Transparency**: Ensures multi-hop queries traverse and output explainable Cypher paths.
 
 ---
 
@@ -54,30 +54,34 @@ python -m eval.run --suite edge
 # Custom concurrency and output directory
 python -m eval.run --suite all --max-concurrency 10 --output-dir reports
 
-# Enable real Google GenAI model evaluation (requires GOOGLE_API_KEY)
+# Enable real LLM evaluation (Google GenAI or Ollama)
 python -m eval.run --suite all --real-llm
 ```
 
 ---
 
-## 4. Reading Generated Reports
+## 4. Benchmark Results on Native FalkorDB
+
+```markdown
+# OpsMemory Benchmark Report
+- **Suite:** all
+- **Storage Engine:** FalkorDB (Native Cypher, RediSearch Full-Text, 64-dim Dense Vector)
+- **Overall Accuracy:** 100.0% (88/88 passed)
+- **Latency (p50 / p95):** 30.8ms / 75.3ms
+
+| Difficulty | Cases | Passed | Accuracy | p50 Latency | p95 Latency |
+|---|---|---|---|---|---|
+| Easy | 22 | 22 | 100.0% | 30.5ms | 36.4ms |
+| Medium | 22 | 22 | 100.0% | 30.8ms | 37.2ms |
+| Hard | 22 | 22 | 100.0% | 35.4ms | 210.1ms |
+| Edge | 22 | 22 | 100.0% | 28.0ms | 34.3ms |
+```
+
+---
+
+## 5. Artifacts & Audit Logs
 
 Each benchmark execution automatically generates three artifacts in `reports/`:
 - `reports/benchmark_<timestamp>.json`: Full case-by-case execution data, latency, citations, and evaluation results.
 - `reports/benchmark_<timestamp>.csv`: Spreadsheet-friendly format with case ID, difficulty, pass/fail status, and latency.
 - `reports/benchmark_summary_<timestamp>.md`: Formatted executive summary table broken down by difficulty tier.
-
-Example Summary:
-```markdown
-# OpsMemory Benchmark Report
-- **Suite:** all
-- **Overall Accuracy:** 100.0% (88/88)
-- **Latency (p50 / p95):** 23.6ms / 92.2ms
-
-| Difficulty | Cases | Passed | Accuracy | p50 Latency | p95 Latency |
-|---|---|---|---|---|---|
-| Easy | 22 | 22 | 100.0% | 23.6ms | 33.3ms |
-| Medium | 22 | 22 | 100.0% | 22.9ms | 41.4ms |
-| Hard | 22 | 22 | 100.0% | 35.6ms | 205.3ms |
-| Edge | 22 | 22 | 100.0% | 19.0ms | 40.1ms |
-```

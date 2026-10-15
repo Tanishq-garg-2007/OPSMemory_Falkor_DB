@@ -67,4 +67,31 @@ class ResolverAgent:
 
         # Complete task on board
         self.task_board.complete_task(context, task_id, self.worker_id, result)
+
+        # Record handoff edge: agent_resolver -> agent_curator
+        self.task_board.repo.record_agent_handoff(
+            context=context,
+            from_agent="agent_resolver",
+            to_agent="agent_curator",
+            task_id=task_id,
+            reason="post_incident_curation",
+            shared_state=result
+        )
+
+        # Trigger Curator to persist/update outcome procedural memory in FalkorDB
+        try:
+            from app.memory.lifecycle import MemoryLifecycle
+            lifecycle = MemoryLifecycle(self.task_board.repo)
+            lifecycle.store_memory(
+                context=context,
+                memory_type="procedural",
+                subtype="post_incident_runbook",
+                title=f"Resolution procedure for {title or task_id}",
+                summary=recommendation,
+                entity_names=entities,
+                confidence_basis="agent_inference"
+            )
+        except Exception as e:
+            logger.warning(f"Post-incident curation error: {e}")
+
         return result

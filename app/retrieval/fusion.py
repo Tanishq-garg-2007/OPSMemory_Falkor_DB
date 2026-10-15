@@ -70,6 +70,10 @@ class RankFusion:
             mem_text = (mem.title.lower() + " " + mem.summary.lower())
             distinct_match = 1.0 if any(term in mem_text for term in ["v2.3", "v2.2", "inc-101"]) and any(term in q_low for term in ["v2.3", "v2.2", "inc-101"]) else 0.0
 
+            # Target entity and ownership intent matches
+            entity_match = 1.0 if any(e in intent.target_entities for e in mem.entities) else 0.0
+            ownership_match = 1.0 if (("owner" in q_low or "owns" in q_low or "team" in q_low) and ("owner" in mem_text or "owned" in mem_text or "team" in mem_text)) else 0.0
+
             # Status penalty
             if mem.status == "active":
                 status_penalty = 0.0
@@ -90,6 +94,8 @@ class RankFusion:
                 + (0.15 * procedural_match)
                 + (0.15 * decision_match)
                 + (0.25 * distinct_match)
+                + (0.15 * entity_match)
+                + (0.15 * ownership_match)
                 - (0.30 * status_penalty)
             )
 

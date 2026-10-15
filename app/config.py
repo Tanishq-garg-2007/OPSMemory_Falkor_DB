@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     SQLITE_DB_PATH: str = "opsmemory.db"
 
     # Retrieval
-    ENABLE_EMBEDDINGS: bool = False
+    ENABLE_EMBEDDINGS: bool = True
     EVIDENCE_TOKEN_BUDGET: int = 1200
     RRF_K: int = 60
 

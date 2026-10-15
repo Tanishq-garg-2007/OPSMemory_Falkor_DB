@@ -86,6 +86,15 @@ class TriageAgent:
                     }
                 )
                 created_tasks.append(task)
+                self.lifecycle.repo.record_agent_handoff(
+                    context=context,
+                    from_agent="agent_triage",
+                    to_agent="agent_resolver",
+                    task_id=task.id,
+                    reason=f"incident_triage_{epi.severity}",
+                    shared_state={"memory_id": mem.id, "title": mem.title, "severity": epi.severity},
+                    memory_id=mem.id
+                )
 
         # 4. Persist semantic facts
         for sem in extracted.semantic_facts:

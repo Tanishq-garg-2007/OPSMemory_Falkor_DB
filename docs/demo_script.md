@@ -1,30 +1,34 @@
 # OpsMemory Interactive Demo Script
 
 This script walks through an end-to-end demonstration of OpsMemory's core capabilities:
-1. Multi-session episodic, semantic, and procedural memory recall.
-2. Temporal fact supersession (old facts superseded, not silently overwritten).
-3. Evidence-grounded reasoning with citations.
-4. Tenant boundary isolation (`acme` vs `beta`).
-5. Persistent restart resilience.
+1. Multi-session episodic, semantic, and procedural memory recall in FalkorDB.
+2. Temporal fact supersession (old facts superseded with `:SUPERSEDES` edges, not silently overwritten).
+3. Evidence-grounded reasoning with citations and explainable `reasoning_paths`.
+4. Tenant boundary isolation (`acme` vs `beta` graph namespaces).
+5. Graph-mediated multi-agent handoffs & atomic Cypher task leases.
+6. Live FalkorDB graph state inspection via `GET /v1/graph/context`.
 
 ---
 
 ## 1. Setup & Starting the Service
 
-1. Ensure the schema and seed data are initialized:
+1. Verify FalkorDB is running:
+   ```bash
+   docker compose up -d falkordb
+   ```
+2. Initialize schema and seed data in FalkorDB:
    ```bash
    python scripts/init_schema.py
    python scripts/seed.py
    ```
-2. Start the FastAPI server:
+3. Start the FastAPI server:
    ```bash
    python -m uvicorn app.main:app --port 8000
    ```
-3. Open your browser to the Web Console:
+4. Open your browser to the Web Console:
    ```
    http://localhost:8000/ui/
    ```
-   *(Or interact via `curl` terminal commands below).*
 
 ---
 
@@ -55,7 +59,7 @@ curl -X POST http://localhost:8000/v1/chat \
 
 ---
 
-### Step 2: Multi-Hop Incident & Dependency Reasoning
+### Step 2: Multi-Hop Incident & Dependency Reasoning with Explainable Paths
 Ask about dependency impact:
 ```bash
 curl -X POST http://localhost:8000/v1/chat \
@@ -65,20 +69,30 @@ curl -X POST http://localhost:8000/v1/chat \
 ```
 **Expected Response**:
 - Mentions **checkout-ui** (traversing `postgres-orders` -> `payments-api` -> `checkout-ui`).
+- Inspect `reasoning_paths`:
+  ```json
+  "reasoning_paths": [
+    ["postgres-orders", "DEPENDS_ON", "payments-api", "DEPENDS_ON", "checkout-ui"]
+  ]
+  ```
 
 ---
 
-### Step 3: Procedural Memory (Runbook Recall)
-Ask for incident remediation procedures:
+### Step 3: Graph-Mediated Multi-Agent Handoffs & Atomic Task Leases
+Trigger an incident report:
 ```bash
 curl -X POST http://localhost:8000/v1/chat \
   -H "X-Tenant-Key: test_acme_key" \
   -H "Content-Type: application/json" \
-  -d '{"message": "What is the safe rollback procedure for payments-api?"}'
+  -d '{"message": "Outage on checkout: database lock contention observed on payments-api."}'
 ```
 **Expected Response**:
-- Returns step-by-step procedure: canary traffic to 0%, helm rollback, DB migration rollback check, `/healthz` validation.
-- Citation links `mem_procedural_acme_runbook_safe-rollback-procedure-for-payments`.
+- Triage agent captures incident memory, records a handoff edge:
+  `(:Agent {id: 'agent_triage'})-[:HANDED_OFF_TO]->(:Agent {id: 'agent_resolver'})`.
+- Resolver worker atomically claims the task lease via Cypher:
+  `MATCH (t:Task) WHERE t.status = 'pending' ... SET t.status = 'claimed' RETURN t`.
+- Resolver executes runbook and hands off to Curator agent for procedural documentation.
+- Response contains populated `tasks` and `agent_handoffs`.
 
 ---
 
@@ -105,7 +119,43 @@ curl -X POST http://localhost:8000/v1/chat \
 
 ---
 
-### Step 5: Persistence Across App Restart
+### Step 5: Live FalkorDB Graph State Inspection
+Inspect the tenant's live FalkorDB graph state:
+```bash
+curl -H "X-Tenant-Key: test_acme_key" http://localhost:8000/v1/graph/context
+```
+**Expected Response**:
+```json
+{
+  "tenant_id": "acme",
+  "graph_name": "tenant_acme",
+  "falkordb_connected": true,
+  "node_counts": {
+    "Entity": 5,
+    "Memory": 13,
+    "Task": 1,
+    "Session": 1,
+    "Turn": 4,
+    "Agent": 3
+  },
+  "edge_counts": {
+    "DEPENDS_ON": 3,
+    "MENTIONS": 21,
+    "HAS_TURN": 4,
+    "HANDED_OFF_TO": 2,
+    "SUPERSEDES": 1
+  },
+  "recent_turns": [ ... ],
+  "agent_handoffs": [ ... ],
+  "indexes": [
+    { "label": "Memory", "types": { "embedding": ["VECTOR"], "title": ["FULLTEXT"], "summary": ["FULLTEXT"], "id": ["RANGE"] }, "status": "OPERATIONAL" }
+  ]
+}
+```
+
+---
+
+### Step 6: Persistence Across Application Restart
 1. Terminate the server (`Ctrl+C`).
 2. Restart the server:
    ```bash
@@ -120,4 +170,4 @@ curl -X POST http://localhost:8000/v1/chat \
    ```
 **Expected Response**:
 - Returns "concise summaries with direct bullet points".
-- Demonstrates persistent cross-session knowledge retention surviving application restarts.
+- Demonstrates persistent knowledge retention surviving application restarts directly inside FalkorDB.

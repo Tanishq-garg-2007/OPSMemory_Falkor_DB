@@ -30,6 +30,10 @@ def init_schema():
             """, (t_id, key_h, g_name, now))
         con.commit()
 
+    # Idempotently initialize FalkorDB indexes for tenant graphs
+    for t_id, _, _ in tenants:
+        repo.init_tenant_schema(t_id)
+
     health = repo.check_health()
     print(f"Schema initialized. Health status: {health}")
     return 0

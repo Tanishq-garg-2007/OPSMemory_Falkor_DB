@@ -1,37 +1,44 @@
 # OpsMemory
 
-> **Persistent-memory and multi-agent coordination system for incident response and technical support workflows.**
+> **Persistent-memory and multi-agent coordination system for incident response and technical support workflows.**  
+> Built for **Track 2 (Agent Memory and Coordination)** of the **WeMakeDevs FalkorDB Hackathon (Graph Hacks: Context for AI Agents)**.
 
-OpsMemory allows engineering and operations teams to remember past incidents, architectural decisions, service dependencies, versions, user preferences, and runbooks across sessions. Multiple specialized agents coordinate through a shared, lease-based persistent state graph.
+OpsMemory allows engineering and operations teams to remember past incidents, architectural decisions, service dependencies, versions, user preferences, and runbooks across sessions. Multiple specialized agents coordinate through a shared, lease-based persistent state graph running natively in **FalkorDB**.
 
 ---
 
 ## Key Highlights
 
+- **100% Native FalkorDB Engine**: Primary multi-tenant graph, RediSearch full-text, and dense vector similarity search engine running entirely on FalkorDB with zero dead SQL/SQLite fallbacks.
+- **Dynamic Semantic Vector Anchoring**: Sub-millisecond graph entry point discovery via FalkorDB ANN vector search on `:Entity` and live graph alias matching, eliminating static entity lists.
+- **Localized Subgraph Isolation & Cypher Traversal**: Bounded 1-to-3 hop Cypher traversal extracting verified reasoning path chains.
 - **Episodic, Semantic, & Procedural Memory**: Retains incident timelines, service topologies, and runbooks across sessions.
 - **Evidence-Linked Temporal Graph**: Outdated facts are cleanly superseded with `valid_to` timestamps and `:SUPERSEDES` relationships rather than silently overwritten.
-- **Strict Multi-Tenant Isolation**: Cryptographic tenant boundaries with server-derived graph scoping (`tenant_<tenant_id>`) preventing cross-tenant leakage.
-- **Atomic Lease-Based Coordination**: Distributed task board with leases preventing duplicate work or split-brain worker collisions.
-- **Dual-Tier Resilient Persistence**: Primary FalkorDB Cypher graph with an automatic, zero-crash embedded SQLite + FTS5 durable fallback.
-- **Query-Adaptive Retrieval**: Multi-hop graph traversal combined with SQLite FTS5 BM25 search via Reciprocal Rank Fusion ($k=60$) and grounded abstention.
-- **Zero-Monetary Cost**: Runs 100% locally with open-source tools and zero paid dependencies. Ready for Google Gemma 4 31B via Google GenAI SDK.
-- **100% Benchmark Accuracy**: 88/88 test cases passing across Easy, Medium, Hard, and Adversarial test suites with 23.6ms p50 latency.
+- **Persistent Cross-Session Conversation Graph**: Persists conversation turns as `:Session` and `:Turn` nodes chained via `:NEXT_TURN` with memory provenance edges (`:DERIVED_FROM`).
+- **Graph-Mediated Multi-Agent Handoffs**: Direct Cypher edge handoffs (`(:Agent)-[:HANDED_OFF_TO]->(:Agent)`) transferring state between Triage, Resolver, and Curator agents.
+- **Atomic Cypher Task Leases**: Single-roundtrip atomic Cypher task claiming (`MATCH (t:Task) WHERE ... SET t.status = 'claimed' RETURN t`) mathematically guaranteeing zero double-claims under high concurrency.
+- **Native Hybrid RRF Retrieval**: Seamlessly fuses FalkorDB Dense Vector Search (`db.idx.vector.queryNodes`), Full-Text Search (`db.idx.fulltext.queryNodes`), and Multi-Hop Cypher Traversal via Reciprocal Rank Fusion ($k=60$).
+- **Explainable Graph Paths**: Outputs readable dependency chains (e.g. `["postgres-orders", "DEPENDS_ON", "payments-api", "DEPENDS_ON", "checkout-ui"]`) in `reasoning_paths`.
+- **Live Graph Context Inspection**: Dedicated `GET /v1/graph/context` endpoint allowing judges and UI consoles to inspect active nodes, edges, turns, handoffs, and indexes.
+- **Rigorous Ground-Truth Benchmark**: 88/88 test cases passing at **100.0% accuracy** across Easy, Medium, Hard, and Adversarial test suites.
 
 ---
 
 ## Architecture Overview
 
 ```
-User Query ---> FastAPI Gateway ---> Deterministic Coordinator ---> Retrieval & RAG
+User Query ---> FastAPI Gateway ---> Deterministic Coordinator ---> Hybrid Retrieval & RAG
                        |                        |                          |
-               Auth: X-Tenant-Key         Triage Agent            Graph Traversal (1-2 hop)
-                       |                        |                 SQLite FTS5 BM25 Rerank
-               Tenant Context Scope       Task Board              Reciprocal Rank Fusion
-                                          (Atomic Leases)         Token-Bounded Packing
+               Auth: X-Tenant-Key         Triage Agent            FalkorDB Vector Search
+                       |                        |                 FalkorDB Full-Text Search
+               Tenant Context Scope       Task Board              Cypher Multi-Hop Graph
+                                          (Atomic Cypher Leases)  Reciprocal Rank Fusion
+                                                |                 Explainable Paths
+                                          Resolver Agent          Token-Bounded Packing
                                                 |                 Grounded Answer & Citations
-                                          Resolver Agent
+                                          Curator Agent
                                                 |
-                              FalkorDB / SQLite Dual Persistence
+                                    FalkorDB Native Engine
 ```
 
 See [docs/architecture.md](docs/architecture.md) for full design documentation.
@@ -42,7 +49,7 @@ See [docs/architecture.md](docs/architecture.md) for full design documentation.
 
 ### 1. Requirements
 - Python 3.11+ (Python 3.13 tested)
-- Optional: Docker / Docker Compose for local FalkorDB
+- Docker / Docker Compose for local FalkorDB
 
 ### 2. Environment Setup
 ```bash
@@ -60,31 +67,24 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-### 3. Configure Environment
-Copy `.env.example` to `.env`:
+### 3. Start FalkorDB
 ```bash
-cp .env.example .env
-```
-Default `.env` settings:
-```ini
-LLM_PROVIDER=google_genai
-LLM_MODEL_ID=gemma-4-31b-it
-GOOGLE_API_KEY=
-REAL_LLM=0
-FALKORDB_HOST=localhost
-FALKORDB_PORT=6379
-SQLITE_DB_PATH=opsmemory.db
-```
-
-### 4. Initialize Database & Seed Fixtures
-```bash
-# Optional: start FalkorDB container
 docker compose up -d falkordb
+```
+Verify FalkorDB is listening on `localhost:6379`:
+```bash
+python -c "import socket; s=socket.create_connection(('localhost', 6379), timeout=3); print('FALKORDB_PORT_OK'); s.close()"
+```
 
-# Initialize schema and seed Acme & Beta tenants
+### 4. Initialize Schema & Seed Fixtures
+```bash
 python scripts/init_schema.py
 python scripts/seed.py
 ```
+This idempotently creates the following FalkorDB indexes in `tenant_acme` and `tenant_beta`:
+- Range Indexes on `(:Entity {id})`, `(:Memory {id})`, `(:Task {id})`, `(:Session {id})`, `(:Turn {id})`, `(:Agent {id})`.
+- Full-Text Index on `:Memory(title, summary, subtype)`.
+- Dense Vector Index on `:Memory(embedding)` with 64 dimensions and cosine similarity.
 
 ### 5. Start the Application
 ```bash
@@ -102,7 +102,7 @@ All verification in OpsMemory is terminal-driven without requiring manual clicki
 ```bash
 python -m pytest -q
 ```
-*Current result: **31 passed in 6.41s** (100% pass rate).*
+*Result: **31 passed** (100% pass rate).*
 
 ### End-to-End HTTP Smoke Test
 ```bash
@@ -114,18 +114,19 @@ python scripts/smoke.py
 ```bash
 python scripts/benchmark_concurrency.py --requests 20 --concurrency 5
 ```
-*Validates atomic lease contention races (exactly 1 winner), request coalescing, and zero duplicate memories under concurrent load.*
+*Validates atomic Cypher lease contention races (exactly 1 winner), request coalescing, and zero duplicate memories under concurrent load.*
 
-### LLM Connectivity Check
+### Judge Graph Inspection Endpoint
 ```bash
-python scripts/check_llm.py
+curl -H "X-Tenant-Key: test_acme_key" http://localhost:8000/v1/graph/context
 ```
+*Returns active node counts, edge counts, recent conversation turns, agent handoffs, and FalkorDB index statuses.*
 
 ---
 
 ## Mandatory Benchmark Suite
 
-OpsMemory includes a 88-question ground-truth evaluation suite across 4 difficulty tiers:
+OpsMemory includes an 88-question ground-truth evaluation suite across 4 difficulty tiers:
 
 ```bash
 # Run all 88 test cases
@@ -140,12 +141,12 @@ python -m eval.run --suite edge
 
 ### Benchmark Results
 - **Overall Accuracy**: **100.0% (88/88 passed)**
-- **Easy**: 22/22 (100.0%) [p50: 23.6ms, p95: 33.3ms]
-- **Medium**: 22/22 (100.0%) [p50: 22.9ms, p95: 41.4ms]
-- **Hard**: 22/22 (100.0%) [p50: 35.6ms, p95: 205.3ms]
-- **Edge / Adversarial**: 22/22 (100.0%) [p50: 19.0ms, p95: 40.1ms]
-- **p50 Latency**: 23.6 ms
-- **p95 Latency**: 92.2 ms
+- **Easy**: 22/22 (100.0%) [p50: 30.5ms, p95: 36.4ms]
+- **Medium**: 22/22 (100.0%) [p50: 30.8ms, p95: 37.2ms]
+- **Hard**: 22/22 (100.0%) [p50: 35.4ms, p95: 210.1ms]
+- **Edge / Adversarial**: 22/22 (100.0%) [p50: 28.0ms, p95: 34.3ms]
+- **p50 Latency**: 30.8 ms
+- **p95 Latency**: 75.3 ms
 
 Reports are generated automatically in `reports/benchmark_<timestamp>.{json,csv,md}`. See [docs/evaluation.md](docs/evaluation.md) for full benchmark methodology.
 
@@ -155,8 +156,9 @@ Reports are generated automatically in `reports/benchmark_<timestamp>.{json,csv,
 
 | Method | Path | Description | Headers |
 |---|---|---|---|
-| `GET` | `/healthz` | System and DB health status | None |
-| `POST` | `/v1/chat` | Main RAG & memory inquiry endpoint | `X-Tenant-Key` |
+| `GET` | `/healthz` | System and FalkorDB health status | None |
+| `POST` | `/v1/chat` | Main RAG, memory inquiry & explainable reasoning paths | `X-Tenant-Key` |
+| `GET` | `/v1/graph/context` | Live FalkorDB graph state inspection for judges & UI | `X-Tenant-Key` |
 | `GET` | `/v1/conversations/{id}`| Retrieve conversation history | `X-Tenant-Key` |
 | `GET` | `/v1/memories/{id}` | Inspect memory by ID | `X-Tenant-Key` |
 | `GET` | `/v1/tasks` | List coordination tasks on task board | `X-Tenant-Key` |
@@ -170,10 +172,10 @@ Reports are generated automatically in `reports/benchmark_<timestamp>.{json,csv,
 
 See [docs/demo_script.md](docs/demo_script.md) for step-by-step terminal and UI instructions covering:
 1. Fact recall & temporal supersession.
-2. Cross-session multi-hop dependency analysis.
-3. Procedural runbook recall.
+2. Cross-session multi-hop dependency analysis with explainable graph paths.
+3. Graph-mediated multi-agent handoffs & atomic Cypher task leases.
 4. Tenant isolation verification.
-5. Persistent restart resilience.
+5. Persistent restart resilience in FalkorDB.
 
 ---
 

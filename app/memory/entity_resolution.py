@@ -5,6 +5,7 @@ from app.core.ids import entity_id
 from app.dependencies import TenantContext
 from app.memory.models import EntityModel
 from app.memory.repository import MemoryRepository, get_memory_repository
+from app.retrieval.vector_encoder import encode_vector
 
 
 class EntityResolver:
@@ -16,6 +17,9 @@ class EntityResolver:
         """Slugify and clean entity name."""
         return slugify(name)
 
+    def _sim(self, v1: List[float], v2: List[float]) -> float:
+        return sum(x * y for x, y in zip(v1, v2))
+
     def resolve_or_create(
         self,
         context: TenantContext,
@@ -24,30 +28,47 @@ class EntityResolver:
         aliases: Optional[List[str]] = None,
         description: Optional[str] = None
     ) -> EntityModel:
-        """Resolve entity by slug or alias, or create new entity within tenant boundary."""
+        """Resolve entity by name, aliases, or vector similarity, or create new entity."""
+        norm = name.strip().lower()
         slug = self.normalize_name(name)
         eid = entity_id(kind, slug, tenant_id=context.tenant_id)
+        norm_vec = encode_vector(norm)
 
-        existing = self.repo.get_entity(context, eid)
-        if existing:
-            # Merge any new aliases
-            existing_aliases = set(existing.aliases)
+        # 1. Match against existing entities in the tenant graph
+        existing_entities = self.repo.list_entities(context)
+        best_match: Optional[EntityModel] = None
+        best_sim: float = 0.0
+
+        for ent in existing_entities:
+            ent_norm = ent.name.strip().lower()
+            ent_aliases = [a.strip().lower() for a in ent.aliases]
+            # Exact name or alias match
+            if ent_norm == norm or norm in ent_aliases or slug in ent_aliases:
+                best_match = ent
+                break
+            # Vector/token similarity
+            ent_vec = encode_vector(ent_norm)
+            sim = self._sim(norm_vec, ent_vec)
+            if sim > 0.88 and sim > best_sim:
+                best_match = ent
+                best_sim = sim
+
+        if best_match:
+            # Merge new surface form and aliases into existing entity
+            existing_aliases = set(best_match.aliases)
+            existing_aliases.add(norm)
+            existing_aliases.add(slug)
             if aliases:
-                existing_aliases.update(self.normalize_name(a) for a in aliases)
-            existing.aliases = sorted(list(existing_aliases))
-            if description and not existing.description:
-                existing.description = description
-            upserted = self.repo.upsert_entity(context, existing)
-            return upserted or existing
+                for a in aliases:
+                    existing_aliases.add(self.normalize_name(a))
+            best_match.aliases = sorted(list(existing_aliases))
+            if description and not best_match.description:
+                best_match.description = description
+            upserted = self.repo.upsert_entity(context, best_match)
+            return upserted or best_match
 
-        # Check aliases among all entities of this kind in tenant
-        all_entities = self.repo.list_entities(context, kind=kind)
-        for ent in all_entities:
-            if slug in ent.aliases or name.lower() == ent.name.lower():
-                return ent
-
-        # Create new entity
-        clean_aliases = [self.normalize_name(a) for a in (aliases or []) if a]
+        # 2. No match found: create new entity
+        clean_aliases = sorted(list(set([slug] + [self.normalize_name(a) for a in (aliases or []) if a])))
         new_entity = EntityModel(
             id=eid,
             kind=kind,
