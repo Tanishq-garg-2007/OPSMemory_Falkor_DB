@@ -57,19 +57,19 @@ class GraphSearcher:
     # backwards, e.g. "auth-service DEPENDS_ON checkout-ui" when the stored fact
     # is "checkout-ui DEPENDS_ON auth-service".
     _DEPENDENCIES_CYPHER = """
-        MATCH (e1:Entity {tenant_id: $tenant_id})
-        WHERE e1.id = $eid OR toLower(e1.name) = toLower($ent_name)
-        MATCH (e1)-[:DEPENDS_ON]->(e2:Entity {tenant_id: $tenant_id})
-        OPTIONAL MATCH (e2)-[:DEPENDS_ON]->(e3:Entity {tenant_id: $tenant_id})
-        WHERE e3 <> e1
+        MATCH (e1:Entity)-[:DEPENDS_ON]->(e2:Entity)
+        WHERE (e1.id = $eid OR toLower(e1.name) = toLower($ent_name))
+          AND e1.tenant_id = $tenant_id AND e2.tenant_id = $tenant_id
+        OPTIONAL MATCH (e2)-[:DEPENDS_ON]->(e3:Entity)
+        WHERE e3.tenant_id = $tenant_id AND e3 <> e1
         RETURN e1.name, e2.name, e3.name
     """
     _DEPENDENTS_CYPHER = """
-        MATCH (e1:Entity {tenant_id: $tenant_id})
-        WHERE e1.id = $eid OR toLower(e1.name) = toLower($ent_name)
-        MATCH (e2:Entity {tenant_id: $tenant_id})-[:DEPENDS_ON]->(e1)
-        OPTIONAL MATCH (e3:Entity {tenant_id: $tenant_id})-[:DEPENDS_ON]->(e2)
-        WHERE e3 <> e1
+        MATCH (e2:Entity)-[:DEPENDS_ON]->(e1:Entity)
+        WHERE (e1.id = $eid OR toLower(e1.name) = toLower($ent_name))
+          AND e1.tenant_id = $tenant_id AND e2.tenant_id = $tenant_id
+        OPTIONAL MATCH (e3:Entity)-[:DEPENDS_ON]->(e2)
+        WHERE e3.tenant_id = $tenant_id AND e3 <> e1
         RETURN e3.name, e2.name, e1.name
     """
 
