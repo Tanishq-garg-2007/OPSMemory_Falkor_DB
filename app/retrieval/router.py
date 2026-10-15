@@ -2,6 +2,7 @@
 import re
 from typing import List, Optional
 from pydantic import BaseModel, Field
+from app.memory.signals import has_incident_signal
 
 
 class QueryIntent(BaseModel):
@@ -12,6 +13,38 @@ class QueryIntent(BaseModel):
     is_incident_query: bool = False
     target_entities: List[str] = Field(default_factory=list)
     incident_id: Optional[str] = None
+    # "dependencies": what the entity depends on (outgoing DEPENDS_ON)
+    # "dependents":   what depends on the entity (incoming DEPENDS_ON / blast radius)
+    # "both":         unspecified, show both, each in its true direction
+    dependency_direction: str = "both"
+
+
+_DEPENDENTS_RE = re.compile(
+    r"\b(what|which|who|any)\b\s+(?:\w+\s+)?(?:depends?|relies|rely|reliant)\s+on\b"
+    r"|\b(dependents?|downstream|blast radius|impacted by|affected by|break if)\b"
+)
+_DEPENDENCIES_RE = re.compile(
+    r"\b(depends?|relies|rely|uses?|dependenc(?:y|ies)|requires?)\b"
+)
+
+
+def detect_dependency_direction(query: str) -> str:
+    q = query.lower()
+    if _DEPENDENTS_RE.search(q):
+        return "dependents"
+    if _DEPENDENCIES_RE.search(q):
+        return "dependencies"
+    return "both"
+
+
+def _has_phrase(text: str, phrases: List[str]) -> bool:
+    """Phrase match anchored at a word start, so a keyword never matches in the middle of another word."""
+    return any(re.search(r"\b" + re.escape(p), text) for p in phrases)
+
+
+def _has_word(text: str, words: List[str]) -> bool:
+    """Whole-word match (optional plural s): "now" must not match "know", "down" must not match "download"."""
+    return any(re.search(r"\b" + re.escape(w) + r"s?\b", text) for w in words)
 
 
 class RetrievalRouter:
@@ -26,24 +59,24 @@ class RetrievalRouter:
         q_lower = query.lower()
 
         # Procedural intent
-        is_procedural = any(w in q_lower for w in [
+        is_procedural = _has_phrase(q_lower, [
             "how to", "procedure", "runbook", "rollback", "steps", "guide", "escalate"
         ])
 
         # Historical vs current
-        is_historical = any(w in q_lower for w in [
+        is_historical = _has_phrase(q_lower, [
             "before", "previous", "prior", "last time", "history", "earlier", "originally"
         ])
 
         # Current fact
-        is_current = any(w in q_lower for w in [
-            "current", "latest", "now", "who owns", "what version", "preference"
-        ]) or (not is_historical and not is_procedural)
+        is_current = (
+            _has_phrase(q_lower, ["current", "latest", "who owns", "what version", "preference"])
+            or _has_word(q_lower, ["now"])
+            or (not is_historical and not is_procedural)
+        )
 
         # Incident
-        is_incident = any(w in q_lower for w in [
-            "incident", "inc-", "outage", "failure", "broken", "down"
-        ])
+        is_incident = has_incident_signal(q_lower)
 
         # Match incident IDs like inc-101
         inc_match = re.search(r"\binc[-_]?\d+\b", q_lower)
@@ -83,5 +116,6 @@ class RetrievalRouter:
             is_current_fact=is_current,
             is_incident_query=is_incident,
             target_entities=target_entities,
-            incident_id=incident_id
+            incident_id=incident_id,
+            dependency_direction=detect_dependency_direction(query)
         )

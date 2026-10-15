@@ -1,5 +1,6 @@
 """Health check endpoint."""
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from typing import Dict, Any
 from app.config import Settings, get_settings
 
@@ -7,14 +8,14 @@ router = APIRouter(tags=["Health"])
 
 
 @router.get("/healthz")
-async def health_check(settings: Settings = Depends(get_settings)) -> Dict[str, Any]:
+async def health_check(settings: Settings = Depends(get_settings)):
     """Returns application health, persistence health, and LLM provider configuration."""
     from app.memory.repository import get_memory_repository
     repo = get_memory_repository()
     db_health = repo.check_health()
 
-    return {
-        "status": "ok" if db_health.get("ok", True) else "degraded",
+    body = {
+        "status": "ok" if db_health.get("ok") else "unavailable",
         "app": "opsmemory",
         "version": "0.1.0",
         "database": db_health,
@@ -26,3 +27,4 @@ async def health_check(settings: Settings = Depends(get_settings)) -> Dict[str, 
             "has_google_key": bool(settings.effective_google_api_key)
         }
     }
+    return JSONResponse(status_code=200 if db_health.get("ok") else 503, content=body)

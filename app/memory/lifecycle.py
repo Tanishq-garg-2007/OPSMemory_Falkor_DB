@@ -7,7 +7,7 @@ from app.dependencies import TenantContext
 from app.memory.models import MemoryModel, SourceModel, EntityModel
 from app.memory.repository import MemoryRepository, get_memory_repository
 from app.memory.entity_resolution import EntityResolver
-from app.memory.conflicts import CONFIDENCE_MAP, detect_semantic_conflict
+from app.memory.conflicts import CONFIDENCE_MAP, detect_semantic_conflict, should_supersede
 from app.core.logging import get_logger
 
 logger = get_logger("memory_lifecycle")
@@ -95,23 +95,24 @@ class MemoryLifecycle:
 
         # Check existing active memories for semantic conflict / supersession
         existing_memories = self.repo.list_memories(context, status="active", memory_type=memory_type)
+        explicit_update = supersedes_id is not None or confidence_basis == "user_correction"
         for old_mem in existing_memories:
-            if detect_semantic_conflict(old_mem, incoming):
-                # If incoming has higher confidence or is explicit correction, supersede old
-                if incoming.confidence >= old_mem.confidence:
-                    logger.info(f"Superseding memory {old_mem.id} with new memory {incoming.id}")
-                    self.repo.update_memory_status(
-                        context=context,
-                        memory_id=old_mem.id,
-                        new_status="superseded",
-                        valid_to=now,
-                        expected_version=old_mem.version,
-                        superseded_by=incoming.id
-                    )
-                    incoming.supersedes_id = old_mem.id
-                else:
-                    # Mark incoming as conflicted if cannot supersede
-                    incoming.status = "conflicted"
+            if not detect_semantic_conflict(old_mem, incoming):
+                continue
+            if explicit_update or should_supersede(old_mem, incoming):
+                logger.info(f"Superseding memory {old_mem.id} with new memory {incoming.id}")
+                self.repo.update_memory_status(
+                    context=context,
+                    memory_id=old_mem.id,
+                    new_status="superseded",
+                    valid_to=now,
+                    expected_version=old_mem.version,
+                    superseded_by=incoming.id
+                )
+                incoming.supersedes_id = old_mem.id
+            else:
+                # Incoming is a clearly weaker source than what we already trust.
+                incoming.status = "conflicted"
 
         return self.repo.save_memory(context, incoming)
 

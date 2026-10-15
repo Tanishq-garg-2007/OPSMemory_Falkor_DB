@@ -1,187 +1,202 @@
 # OpsMemory
 
-> **Persistent-memory and multi-agent coordination system for incident response and technical support workflows.**  
+> **Persistent memory and multi-agent coordination for incident response and technical-support workflows.**
 > Built for **Track 2 (Agent Memory and Coordination)** of the **WeMakeDevs FalkorDB Hackathon (Graph Hacks: Context for AI Agents)**.
 
-OpsMemory allows engineering and operations teams to remember past incidents, architectural decisions, service dependencies, versions, user preferences, and runbooks across sessions. Multiple specialized agents coordinate through a shared, lease-based persistent state graph running natively in **FalkorDB**.
+OpsMemory lets engineering and operations teams remember past incidents, decisions, service dependencies, versions, user preferences and runbooks across sessions. Specialised agents (triage, resolver, curator) coordinate through a shared, lease-based state graph that lives entirely in **FalkorDB**.
+
+- **Demo video:** _add link here before submitting_ (shot list in [docs/demo_script.md](docs/demo_script.md))
+- **Live deployment:** _add URL here if you deploy; `docker compose up -d --build` runs the full stack_
+- **AI assistance:** see [AI disclosure](#ai-disclosure)
 
 ---
 
-## Key Highlights
+## What it does
 
-- **100% Native FalkorDB Engine**: Primary multi-tenant graph, RediSearch full-text, and dense vector similarity search engine running entirely on FalkorDB with zero dead SQL/SQLite fallbacks.
-- **Dynamic Semantic Vector Anchoring**: Sub-millisecond graph entry point discovery via FalkorDB ANN vector search on `:Entity` and live graph alias matching, eliminating static entity lists.
-- **Localized Subgraph Isolation & Cypher Traversal**: Bounded 1-to-3 hop Cypher traversal extracting verified reasoning path chains.
-- **Episodic, Semantic, & Procedural Memory**: Retains incident timelines, service topologies, and runbooks across sessions.
-- **Evidence-Linked Temporal Graph**: Outdated facts are cleanly superseded with `valid_to` timestamps and `:SUPERSEDES` relationships rather than silently overwritten.
-- **Persistent Cross-Session Conversation Graph**: Persists conversation turns as `:Session` and `:Turn` nodes chained via `:NEXT_TURN` with memory provenance edges (`:DERIVED_FROM`).
-- **Graph-Mediated Multi-Agent Handoffs**: Direct Cypher edge handoffs (`(:Agent)-[:HANDED_OFF_TO]->(:Agent)`) transferring state between Triage, Resolver, and Curator agents.
-- **Atomic Cypher Task Leases**: Single-roundtrip atomic Cypher task claiming (`MATCH (t:Task) WHERE ... SET t.status = 'claimed' RETURN t`) mathematically guaranteeing zero double-claims under high concurrency.
-- **Native Hybrid RRF Retrieval**: Seamlessly fuses FalkorDB Dense Vector Search (`db.idx.vector.queryNodes`), Full-Text Search (`db.idx.fulltext.queryNodes`), and Multi-Hop Cypher Traversal via Reciprocal Rank Fusion ($k=60$).
-- **Explainable Graph Paths**: Outputs readable dependency chains (e.g. `["postgres-orders", "DEPENDS_ON", "payments-api", "DEPENDS_ON", "checkout-ui"]`) in `reasoning_paths`.
-- **Live Graph Context Inspection**: Dedicated `GET /v1/graph/context` endpoint allowing judges and UI consoles to inspect active nodes, edges, turns, handoffs, and indexes.
-- **Rigorous Ground-Truth Benchmark**: 88/88 test cases passing at **100.0% accuracy** across Easy, Medium, Hard, and Adversarial test suites.
+- **FalkorDB is the only datastore.** Entities, memories, tasks, sources, conversations, turns and agent handoffs are nodes and edges in a per-tenant graph (`tenant_<id>`). There is no SQLite or any secondary copy. If FalkorDB is unreachable the API answers `503` instead of degrading silently.
+- **Temporal memory.** A newer fact supersedes an older one (`valid_to` is set and a `:SUPERSEDES` edge is written). Superseded facts stay queryable for "what was it before?" questions.
+- **Hybrid retrieval.** FalkorDB vector search, full-text search and directed Cypher traversal are fused with Reciprocal Rank Fusion (k = 60), packed within a token budget and answered with citations.
+- **Grounded abstention.** If nothing the system remembers relates to a question, it abstains instead of improvising (`app/retrieval/grounding.py`); the answer prompt also tells the LLM to abstain when evidence is insufficient.
+- **Explainable paths.** `reasoning_paths` returns dependency chains in their real direction, e.g. `checkout-ui DEPENDS_ON payments-api DEPENDS_ON postgres-orders`.
+- **Multi-agent handoffs and atomic task leases.** Handoffs are `(:Agent)-[:HANDED_OFF_TO]->(:Agent)` edges. Tasks are claimed with a single Cypher `MATCH ... SET` so two workers cannot claim the same task.
+- **Tenant isolation.** Hashed API keys in a control graph, a server-side graph name per tenant, strict tenant-id format (`[a-z0-9_]`, 1-48 chars) and a separate admin key.
 
----
-
-## Architecture Overview
+## Architecture
 
 ```
-User Query ---> FastAPI Gateway ---> Deterministic Coordinator ---> Hybrid Retrieval & RAG
-                       |                        |                          |
-               Auth: X-Tenant-Key         Triage Agent            FalkorDB Vector Search
-                       |                        |                 FalkorDB Full-Text Search
-               Tenant Context Scope       Task Board              Cypher Multi-Hop Graph
-                                          (Atomic Cypher Leases)  Reciprocal Rank Fusion
-                                                |                 Explainable Paths
-                                          Resolver Agent          Token-Bounded Packing
-                                                |                 Grounded Answer & Citations
-                                          Curator Agent
-                                                |
-                                    FalkorDB Native Engine
+User ---> FastAPI ---> Coordinator ---> Hybrid retrieval + RAG
+              |            |                  |
+        X-Tenant-Key   Triage agent      FalkorDB vector search
+              |            |             FalkorDB full-text search
+        Tenant context  Task board       Directed Cypher traversal
+                       (Cypher leases)   Reciprocal Rank Fusion
+                           |             Grounding gate
+                      Resolver agent     Evidence packing -> answer + citations
+                           |
+                      Curator agent
+                           |
+                  FalkorDB (graph per tenant)
 ```
 
-See [docs/architecture.md](docs/architecture.md) for full design documentation.
+Full design: [docs/architecture.md](docs/architecture.md).
 
----
+## Graph data model
 
-## Quickstart
+Nodes (all carry `tenant_id`):
 
-### 1. Requirements
-- Python 3.11+ (Python 3.13 tested)
-- Docker / Docker Compose for local FalkorDB
+| Label | Purpose |
+|---|---|
+| `:Entity` | Service, team, user, version, concept (`kind`, `name`, `aliases`, `embedding`) |
+| `:Memory` | Episodic / semantic / procedural memory (`status`, `confidence`, `valid_from`, `valid_to`, `embedding`) |
+| `:Source`, `:Conversation` | Provenance of a memory |
+| `:Session`, `:Turn` | Cross-session conversation history |
+| `:Task`, `:Agent` | Coordination board and the three agents |
 
-### 2. Environment Setup
+Relationships:
+
+```
+(:Entity)-[:DEPENDS_ON]->(:Entity)          direction is meaningful: A depends on B
+(:Memory)-[:ABOUT|MENTIONS]->(:Entity)
+(:Memory)-[:SUPERSEDES]->(:Memory)          newer fact replaces older fact
+(:Memory)-[:DERIVED_FROM]->(:Source|:Turn)
+(:Session)-[:HAS_TURN]->(:Turn)-[:NEXT_TURN]->(:Turn)
+(:Agent)-[:HANDED_OFF_TO {task_id, reason, shared_state_json, timestamp}]->(:Agent)
+(:Task)-[:FOR]->(:Memory)    (:Agent)-[:ASSIGNED_TO]->(:Task)
+```
+
+Tenants are registered in a control graph, `opsmemory_control` (`(:Tenant {tenant_id, graph_name, api_key_hash})`); raw API keys are never stored.
+
+## Key Cypher
+
+```cypher
+-- Indexes (per tenant graph)
+CREATE FULLTEXT INDEX FOR (m:Memory) ON (m.title, m.summary, m.subtype)
+CREATE VECTOR INDEX FOR (m:Memory) ON (m.embedding) OPTIONS {dimension: 64, similarityFunction: 'cosine'}
+
+-- What does X depend on? (directed, two hops)
+MATCH (e1:Entity {tenant_id: $tenant_id}) WHERE e1.id = $eid OR toLower(e1.name) = toLower($ent_name)
+MATCH (e1)-[:DEPENDS_ON]->(e2:Entity {tenant_id: $tenant_id})
+OPTIONAL MATCH (e2)-[:DEPENDS_ON]->(e3:Entity {tenant_id: $tenant_id}) WHERE e3 <> e1
+RETURN e1.name, e2.name, e3.name
+
+-- What depends on X? (blast radius)
+MATCH (e1:Entity {tenant_id: $tenant_id}) WHERE e1.id = $eid OR toLower(e1.name) = toLower($ent_name)
+MATCH (e2:Entity {tenant_id: $tenant_id})-[:DEPENDS_ON]->(e1)
+OPTIONAL MATCH (e3:Entity {tenant_id: $tenant_id})-[:DEPENDS_ON]->(e2) WHERE e3 <> e1
+RETURN e3.name, e2.name, e1.name
+
+-- Hybrid retrieval inputs
+CALL db.idx.fulltext.queryNodes('Memory', $fts_query) YIELD node, score
+CALL db.idx.vector.queryNodes('Memory', 'embedding', $k, vecf32($query_vec)) YIELD node, score
+
+-- Atomic task claim (one round trip, lease-based)
+MATCH (t:Task {id: $task_id, tenant_id: $tenant_id})
+WHERE t.status = 'pending' OR (t.status = 'claimed' AND t.lease_expires < $now)
+SET t.status = 'claimed', t.lease_owner = $worker_id, t.lease_expires = $lease_expires
+RETURN t
+```
+
+## Setup
+
+Requirements: Python 3.11+, Docker (for FalkorDB).
+
 ```bash
-# Clone and enter workspace
-cd OPSMemory
-
-# Create virtual environment and activate
+git clone https://github.com/Tanishq-garg-2007/OPSMemory.git && cd OPSMemory
 python -m venv .venv
-# Windows PowerShell:
-.venv\Scripts\Activate.ps1
-# Linux/macOS:
-source .venv/bin/activate
+source .venv/bin/activate            # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
 
-# Install dependencies
-pip install -e .
-```
+cp .env.example .env                 # then edit .env:
+#   ADMIN_API_KEY=<long random string>   (admin endpoints stay disabled until this is set)
+#   LLM_PROVIDER=mock                    (offline demo) or google_genai with GOOGLE_API_KEY=...
 
-### 3. Start FalkorDB
-```bash
-docker compose up -d falkordb
-```
-Verify FalkorDB is listening on `localhost:6379`:
-```bash
-python -c "import socket; s=socket.create_connection(('localhost', 6379), timeout=3); print('FALKORDB_PORT_OK'); s.close()"
-```
-
-### 4. Initialize Schema & Seed Fixtures
-```bash
-python scripts/init_schema.py
-python scripts/seed.py
-```
-This idempotently creates the following FalkorDB indexes in `tenant_acme` and `tenant_beta`:
-- Range Indexes on `(:Entity {id})`, `(:Memory {id})`, `(:Task {id})`, `(:Session {id})`, `(:Turn {id})`, `(:Agent {id})`.
-- Full-Text Index on `:Memory(title, summary, subtype)`.
-- Dense Vector Index on `:Memory(embedding)` with 64 dimensions and cosine similarity.
-
-### 5. Start the Application
-```bash
+docker compose up -d falkordb        # FalkorDB on localhost:6379
+python scripts/init_schema.py        # registers demo tenants (hashed keys) + creates indexes
+python scripts/seed.py               # loads fixtures for acme and beta (gamma = hold-out set)
 python -m uvicorn app.main:app --port 8000
 ```
-Open **`http://localhost:8000/ui/`** in your browser to access the interactive web console.
 
----
+Open `http://localhost:8000/ui/` for the web console.
 
-## Terminal Verification & Testing
+Everything in one container set instead: `docker compose up -d --build`, then `docker compose exec app python scripts/init_schema.py`.
 
-All verification in OpsMemory is terminal-driven without requiring manual clicking.
+### Authentication
 
-### Unit & Integration Tests (pytest)
+| Use | Header | Value |
+|---|---|---|
+| Tenant API (`/v1/chat`, `/v1/memories`, `/v1/tasks`, `/v1/graph/context`, ...) | `X-Tenant-Key` | Key registered by `scripts/init_schema.py`. Demo keys: `key_acme_secret`, `key_beta_secret`, `key_gamma_secret` (override with `OPSMEMORY_KEY_ACME`, `..._BETA`, `..._GAMMA`). **Demo keys only; change them for any real deployment.** |
+| Admin API (`/v1/admin/seed`, `/v1/admin/reset`) | `X-Admin-Key` | Value of `ADMIN_API_KEY` |
+
 ```bash
-python -m pytest -q
+curl -X POST http://localhost:8000/v1/chat -H "X-Tenant-Key: key_acme_secret" -H "Content-Type: application/json" \
+     -d '{"message": "What is the current version of payments-api?"}'
+curl -X POST "http://localhost:8000/v1/admin/reset?tenant_id=acme" -H "X-Admin-Key: $ADMIN_API_KEY"
 ```
-*Result: **31 passed** (100% pass rate).*
 
-### End-to-End HTTP Smoke Test
-```bash
-python scripts/smoke.py
-```
-*Verifies `/healthz`, admin seeding, chat with citations, memories API, task board, cross-tenant isolation, and static UI.*
+## Tests
 
-### Concurrency Stress Test
 ```bash
+python -m pytest -q          # needs FalkorDB running; unit tests that need no database run regardless
+python scripts/smoke.py      # end-to-end HTTP smoke test (set ADMIN_API_KEY first)
 python scripts/benchmark_concurrency.py --requests 20 --concurrency 5
 ```
-*Validates atomic Cypher lease contention races (exactly 1 winner), request coalescing, and zero duplicate memories under concurrent load.*
 
-### Judge Graph Inspection Endpoint
-```bash
-curl -H "X-Tenant-Key: test_acme_key" http://localhost:8000/v1/graph/context
-```
-*Returns active node counts, edge counts, recent conversation turns, agent handoffs, and FalkorDB index statuses.*
+The number of tests changes as the suite grows; run the command rather than trusting a number written here.
 
----
-
-## Mandatory Benchmark Suite
-
-OpsMemory includes an 88-question ground-truth evaluation suite across 4 difficulty tiers:
+## Benchmark, and what it does and does not show
 
 ```bash
-# Run all 88 test cases
-python -m eval.run --suite all
-
-# Run specific difficulty suites
-python -m eval.run --suite easy
-python -m eval.run --suite medium
-python -m eval.run --suite hard
-python -m eval.run --suite edge
+python -m eval.run --suite all                     # 88 bundled questions, tenants acme + beta
+python -m eval.run --dataset holdout               # 30 unseen questions, unseen tenant gamma
+python -m eval.run --suite all --real-llm          # same 88 questions with a real LLM (needs GOOGLE_API_KEY)
+python -m eval.run --dataset holdout --real-llm
 ```
 
-### Benchmark Results
-- **Overall Accuracy**: **100.0% (88/88 passed)**
-- **Easy**: 22/22 (100.0%) [p50: 30.5ms, p95: 36.4ms]
-- **Medium**: 22/22 (100.0%) [p50: 30.8ms, p95: 37.2ms]
-- **Hard**: 22/22 (100.0%) [p50: 35.4ms, p95: 210.1ms]
-- **Edge / Adversarial**: 22/22 (100.0%) [p50: 28.0ms, p95: 34.3ms]
-- **p50 Latency**: 30.8 ms
-- **p95 Latency**: 75.3 ms
+Reports are written to `reports/` (`benchmark_*` and `holdout_*`, as JSON, CSV and Markdown).
 
-Reports are generated automatically in `reports/benchmark_<timestamp>.{json,csv,md}`. See [docs/evaluation.md](docs/evaluation.md) for full benchmark methodology.
+**Read the numbers honestly.** The 88 bundled questions, their fixtures and the offline mock LLM were developed together, so a perfect score on them (88/88 on the last recorded run, mock LLM) shows the pipeline works end to end, **not** that it generalises. The mock LLM has a short list of abstain markers (`MOCK_ONLY_ABSTAIN_MARKERS` in `app/llm/mock.py`) that stand in for an LLM's judgement; the product's own abstention is the generic grounding gate plus the answer prompt. For evidence of generalisation use the hold-out run (a new tenant with new services, versions, owners and incidents, none of which appear in the code) and the `--real-llm` runs.
 
----
+| Run | Result |
+|---|---|
+| Bundled benchmark, mock LLM | 88/88 on the last recorded run |
+| Hold-out (`gamma`), mock LLM | _run and fill in_ |
+| Bundled benchmark, real LLM | _run and fill in_ |
+| Hold-out, real LLM | _run and fill in_ |
 
-## API Endpoints
+Methodology: [docs/evaluation.md](docs/evaluation.md).
 
-| Method | Path | Description | Headers |
+## API
+
+| Method | Path | Description | Auth |
 |---|---|---|---|
-| `GET` | `/healthz` | System and FalkorDB health status | None |
-| `POST` | `/v1/chat` | Main RAG, memory inquiry & explainable reasoning paths | `X-Tenant-Key` |
-| `GET` | `/v1/graph/context` | Live FalkorDB graph state inspection for judges & UI | `X-Tenant-Key` |
-| `GET` | `/v1/conversations/{id}`| Retrieve conversation history | `X-Tenant-Key` |
-| `GET` | `/v1/memories/{id}` | Inspect memory by ID | `X-Tenant-Key` |
-| `GET` | `/v1/tasks` | List coordination tasks on task board | `X-Tenant-Key` |
-| `POST` | `/v1/admin/seed` | Seed deterministic test fixtures | `X-Tenant-Key` |
-| `POST` | `/v1/admin/reset` | Wipe tenant memory records | `X-Tenant-Key` |
-| `GET` | `/ui/` | Interactive web console UI | None |
+| `GET` | `/healthz` | System and FalkorDB health | none |
+| `POST` | `/v1/chat` | Question answering, memory capture, reasoning paths | `X-Tenant-Key` |
+| `GET` | `/v1/graph/context` | Live graph inspection: node/edge counts, turns, handoffs, indexes | `X-Tenant-Key` |
+| `GET` | `/v1/conversations/{id}` | Conversation history | `X-Tenant-Key` |
+| `GET` / `DELETE` | `/v1/memories/{id}` | Inspect or delete a memory (404 if unknown) | `X-Tenant-Key` |
+| `GET` | `/v1/tasks` | Task board | `X-Tenant-Key` |
+| `POST` | `/v1/admin/seed`, `/v1/admin/reset` | Seed fixtures / wipe a tenant | `X-Admin-Key` |
+| `GET` | `/ui/` | Web console | none |
 
----
+## Known limitations
 
-## Interactive Demo
+- Entity and intent detection use rules plus the LLM; keyword matching is word-boundary based but English-only.
+- The offline mock LLM is a test double, not a product feature.
+- The 64-dimension encoder is a lightweight hashing n-gram encoder, not a learned embedding model.
+- Progress on the audit of rules, logical flaws and hard-coded values is tracked in [docs/audit_progress.md](docs/audit_progress.md).
 
-See [docs/demo_script.md](docs/demo_script.md) for step-by-step terminal and UI instructions covering:
-1. Fact recall & temporal supersession.
-2. Cross-session multi-hop dependency analysis with explainable graph paths.
-3. Graph-mediated multi-agent handoffs & atomic Cypher task leases.
-4. Tenant isolation verification.
-5. Persistent restart resilience in FalkorDB.
+## AI disclosure
 
----
+This project was built with AI coding assistance, which the hackathon rules ask teams to disclose.
 
-## Documentation Index
+- **Initial implementation:** developed with AI coding assistant(s): _author to list the tool names and what they were used for_.
+- **Audit remediation (15 Oct 2026):** fixes for the audit findings (supersession, update capture, path direction, admin and tenant auth, FalkorDB-only storage, incident detection, ID collisions, grounding gate, name resolution, hold-out benchmark, documentation) were drafted with Claude (Anthropic) and then reviewed, applied and tested by the author.
+- The author is responsible for the submitted code and can explain it.
 
-- [Architecture Design & Schema](docs/architecture.md)
-- [Evaluation & Benchmark Methodology](docs/evaluation.md)
-- [Interactive Demo Walkthrough](docs/demo_script.md)
-- [Troubleshooting Guide](docs/troubleshooting.md)
+## Documentation
+
+- [Architecture and schema](docs/architecture.md)
+- [Evaluation methodology](docs/evaluation.md)
+- [Demo walkthrough and video shot list](docs/demo_script.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Audit remediation progress](docs/audit_progress.md)

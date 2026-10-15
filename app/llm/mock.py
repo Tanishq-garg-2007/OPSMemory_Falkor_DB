@@ -3,6 +3,13 @@ import json
 import re
 from typing import Dict, Any, Optional
 from app.llm.base import BaseLLMClient
+from app.memory.signals import find_services, extract_version_updates, has_incident_signal, is_inquiry
+
+
+MOCK_ONLY_ABSTAIN_MARKERS = (
+    "lunar", "spacecraft", "astronaut", "credit card", "credit cards", "password",
+    "alien", "imaginary", "nonexistent", "hypothetical", "missile", "launch code", "launch codes",
+)
 
 
 class MockLLMClient(BaseLLMClient):
@@ -20,7 +27,6 @@ class MockLLMClient(BaseLLMClient):
         if "resolver" in sys_lower:
             return {
                 "action_plan": ["Set canary traffic to 0%", "Execute helm rollback payments-api", "Verify /healthz"],
-                "runbook_id": "mem_procedural_acme_runbook_safe-rollback-procedure-for-payments",
                 "recommendation": "Follow runbook and notify on-call lead.",
                 "status": "resolved"
             }
@@ -48,11 +54,12 @@ class MockLLMClient(BaseLLMClient):
             q_match = re.search(r"Question:\s*([^\n]+)", prompt)
             q_text = (q_match.group(1) if q_match else "").lower()
 
-            # Check for sensitive, absent, or out-of-domain topics that should trigger grounded abstention
-            sensitive_or_absent_topics = [
-                "lunar", "spacecraft", "astronaut", "credit card", "credit cards", "password",
-                "alien", "imaginary", "nonexistent", "hypothetical", "missile", "launch code", "launch codes"
-            ]
+            # MOCK-ONLY: stands in for the judgement a real LLM makes from the ANSWER_SYSTEM_PROMPT rule
+            # "abstain if the evidence does not answer the question". The product's own, generic abstention
+            # lives in app/retrieval/grounding.py (grounding gate) and in that prompt; this list exists only
+            # so the offline mock behaves plausibly. Do not read mock benchmark scores as generalisation:
+            # use `python -m eval.run --dataset holdout` and `--real-llm`.
+            sensitive_or_absent_topics = MOCK_ONLY_ABSTAIN_MARKERS
             if any(topic in q_text for topic in sensitive_or_absent_topics) and not any(topic in evidence_lower for topic in sensitive_or_absent_topics):
                 return {
                     "answer": "I do not have sufficient recorded evidence in OpsMemory to answer this question accurately.",
@@ -81,10 +88,9 @@ class MockLLMClient(BaseLLMClient):
         user_lower = user_text.lower()
 
         # Service recognition
-        services = ["payments-api", "checkout-ui", "auth-service", "postgres-orders", "inventory-svc", "gateway-api", "payments-worker"]
-        for s in services:
-            if s in user_lower or s.replace("-", " ") in user_lower:
-                entities.append({"kind": "service", "name": s, "aliases": []})
+        service_names = find_services(user_text)
+        for sname in service_names:
+            entities.append({"kind": "service", "name": sname, "aliases": []})
 
         # Version recognition
         versions = re.findall(r"\bv\d+(?:\.\d+)?\b", user_lower)
@@ -92,7 +98,7 @@ class MockLLMClient(BaseLLMClient):
             entities.append({"kind": "version", "name": v, "aliases": []})
 
         # Incident extraction (only for declarative reports)
-        if any(w in user_lower for w in ["incident", "failure", "outage", "broken", "down", "error"]) and not user_lower.startswith(("what", "who", "when", "why", "how", "is")):
+        if has_incident_signal(user_lower) and not is_inquiry(user_text):
             episodic.append({
                 "subtype": "incident",
                 "title": f"Incident: {user_text[:40].strip()}",
@@ -101,16 +107,15 @@ class MockLLMClient(BaseLLMClient):
                 "severity": "high" if "severe" in user_lower or "outage" in user_lower else "medium"
             })
 
-        # Semantic facts extraction (e.g. version or owner)
-        if "version" in user_lower and not user_lower.startswith(("what", "is ", "who")):
-            for v in versions:
-                semantic.append({
-                    "subtype": "fact",
-                    "subject_entity": entities[0]["name"] if entities else "service",
-                    "predicate": "current_version",
-                    "object_value": v,
-                    "confidence_basis": "user_explicit"
-                })
+        # Semantic facts extraction (declarative version updates, with or without the word "version")
+        for subject, version in extract_version_updates(user_text, service_names):
+            semantic.append({
+                "subtype": "fact",
+                "subject_entity": subject,
+                "predicate": "current_version",
+                "object_value": version,
+                "confidence_basis": "user_explicit"
+            })
         if "owned by" in prompt_lower or "owner" in prompt_lower:
             team_match = re.search(r"team\s+([a-zA-Z0-9_-]+)", prompt_lower)
             team_name = f"team-{team_match.group(1)}" if team_match else "team-core"
@@ -136,29 +141,4 @@ class MockLLMClient(BaseLLMClient):
             "semantic_facts": semantic,
             "procedural_requests": procedural,
             "missing_info": []
-        }
-
-        # 2. Answer generation prompt handling
-        # Extract memory IDs and summaries from evidence block
-        citations = re.findall(r"\[Memory ID:\s*([^\]]+)\]", prompt)
-        summaries = re.findall(r"Summary:\s*([^\n]+)", prompt)
-
-        # Check for abstention / missing evidence conditions
-        if not summaries or "no evidence found" in prompt_lower or "no relevant evidence" in prompt_lower:
-            return {
-                "answer": "I do not have sufficient recorded evidence in OpsMemory to answer this question accurately.",
-                "citations": [],
-                "confidence": "low",
-                "abstained": True,
-                "follow_ups": ["Would you like to record this fact or incident in OpsMemory?"]
-            }
-
-        evidence_text = " ".join(summaries)
-        answer = f"Based on persistent records: {evidence_text.strip()}"
-        return {
-            "answer": answer,
-            "citations": citations[:3],
-            "confidence": "high",
-            "abstained": False,
-            "follow_ups": []
         }

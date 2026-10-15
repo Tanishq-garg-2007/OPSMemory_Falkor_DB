@@ -2,10 +2,18 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from app.config import get_settings
+from app.memory.repository import get_memory_repository
 
 
 @pytest.mark.asyncio
 async def test_api_endpoints_workflow():
+    get_settings().ADMIN_API_KEY = "test-admin-key"
+    repo = get_memory_repository()
+    repo.register_tenant("acme", "key_acme_secret")
+    repo.register_tenant("beta", "key_beta_secret")
+    admin = {"X-Admin-Key": "test-admin-key"}
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         # 1. Health
@@ -18,7 +26,7 @@ async def test_api_endpoints_workflow():
         assert chat_no_auth.status_code == 401
 
         # 3. Seed fixtures
-        await client.post("/v1/admin/seed?tenant_id=acme")
+        await client.post("/v1/admin/seed?tenant_id=acme", headers=admin)
 
         # 4. Chat endpoint with valid key
         headers = {"X-Tenant-Key": "key_acme_secret"}
@@ -47,3 +55,26 @@ async def test_api_endpoints_workflow():
         ui_res = await client.get("/ui/")
         assert ui_res.status_code == 200
         assert "OpsMemory" in ui_res.text
+
+
+@pytest.mark.asyncio
+async def test_api_returns_503_when_falkordb_is_down(monkeypatch):
+    """With FalkorDB unreachable the API must fail loudly (503), never silently degrade."""
+    import app.memory.repository as repo_module
+    from app.config import Settings
+
+    dead_repo = repo_module.MemoryRepository(settings=Settings(
+        REAL_LLM=0, LLM_PROVIDER="mock",
+        FALKORDB_HOST="127.0.0.1", FALKORDB_PORT=1, FALKORDB_TIMEOUT_SECONDS=0.5,
+    ))
+    monkeypatch.setattr(repo_module, "_repo", dead_repo)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        health = await client.get("/healthz")
+        assert health.status_code == 503
+        assert health.json()["database"]["mode"] == "falkordb_unavailable"
+
+        res = await client.get("/v1/memories", headers={"X-Tenant-Key": "key_acme_secret"})
+        assert res.status_code == 503
+        assert res.json()["error"] == "DatabaseUnavailableError"

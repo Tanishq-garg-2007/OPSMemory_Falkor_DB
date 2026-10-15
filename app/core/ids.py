@@ -1,6 +1,10 @@
 """Deterministic and stable identifier generators."""
+import hashlib
 import uuid
 from app.core.hashing import slugify
+
+_SLUG_MAX = 36
+_HASH_LEN = 8
 
 
 def entity_id(kind: str, name: str, tenant_id: str = "") -> str:
@@ -12,7 +16,13 @@ def entity_id(kind: str, name: str, tenant_id: str = "") -> str:
 
 def memory_id(memory_type: str, tenant_id: str, subtype: str, title: str) -> str:
     """Generate deterministic memory ID: mem_{type}_{tenant}_{subtype}_{slug}"""
-    slug = slugify(title)[:36]
+    full_slug = slugify(title)
+    slug = full_slug
+    if len(full_slug) > _SLUG_MAX:
+        # Truncating alone makes two long titles with the same prefix collide (and overwrite each other).
+        # Keep the readable prefix and add a short digest of the full slug so the ID stays unique and deterministic.
+        digest = hashlib.sha256(full_slug.encode("utf-8")).hexdigest()[:_HASH_LEN]
+        slug = f"{full_slug[:_SLUG_MAX].rstrip('-')}-{digest}"
     return f"mem_{slugify(memory_type)}_{slugify(tenant_id)}_{slugify(subtype)}_{slug}"
 
 

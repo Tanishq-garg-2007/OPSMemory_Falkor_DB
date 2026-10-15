@@ -5,6 +5,7 @@ from app.core.ids import entity_id
 from app.dependencies import TenantContext
 from app.memory.models import EntityModel
 from app.memory.repository import MemoryRepository, get_memory_repository
+from app.memory.signals import names_equivalent
 from app.retrieval.vector_encoder import encode_vector
 
 
@@ -44,6 +45,10 @@ class EntityResolver:
             ent_aliases = [a.strip().lower() for a in ent.aliases]
             # Exact name or alias match
             if ent_norm == norm or norm in ent_aliases or slug in ent_aliases:
+                best_match = ent
+                break
+            # Same-kind surface-form variants ('auth-svc' vs 'authservice') that the hash vector misses
+            if ent.kind == kind and names_equivalent(name, ent.name):
                 best_match = ent
                 break
             # Vector/token similarity

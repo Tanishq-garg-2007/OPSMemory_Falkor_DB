@@ -3,6 +3,7 @@ from typing import List, Tuple, Dict
 from app.memory.models import MemoryModel
 from app.retrieval.router import QueryIntent
 from app.core.time import parse_iso, utc_now
+from app.memory.signals import reference_tokens
 
 
 class RankFusion:
@@ -42,6 +43,13 @@ class RankFusion:
         # 4. Calculate final score with boosts and status penalties
         final_ranked: List[Tuple[MemoryModel, float]] = []
         now = utc_now()
+        q_low = intent.raw_query.lower()
+        query_refs = reference_tokens(q_low)
+        # A query that names a specific version / incident id, or asks about change over time, targets a
+        # particular past state, so superseded memories must not be penalised for it.
+        is_direct_target = bool(query_refs) or any(
+            term in q_low for term in ["previous", "prior", "before", "why was", "changed", "was that", "used to", "resolved"]
+        )
 
         for mem_id, mem in memory_map.items():
             if mem.status == "deleted":
@@ -50,10 +58,6 @@ class RankFusion:
             rrf = rrf_scores[mem_id]
             confidence = mem.confidence
             graph_prox = graph_scores.get(mem_id, 0.0)
-
-            # Recency score (decay over 30 days)
-            q_low = intent.raw_query.lower()
-            is_direct_target = any(term in q_low for term in ["v2.3", "v2.2", "previous", "prior", "before", "why was", "changed", "was that", "used to", "resolved"])
 
             # Recency score (decay over 30 days unless historical / direct target query)
             try:
@@ -68,7 +72,7 @@ class RankFusion:
 
             # Distinctive entity / version match boost
             mem_text = (mem.title.lower() + " " + mem.summary.lower())
-            distinct_match = 1.0 if any(term in mem_text for term in ["v2.3", "v2.2", "inc-101"]) and any(term in q_low for term in ["v2.3", "v2.2", "inc-101"]) else 0.0
+            distinct_match = 1.0 if (query_refs & reference_tokens(mem_text)) else 0.0
 
             # Target entity and ownership intent matches
             entity_match = 1.0 if any(e in intent.target_entities for e in mem.entities) else 0.0

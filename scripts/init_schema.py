@@ -1,41 +1,27 @@
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from app.config import get_settings
 from app.memory.repository import get_memory_repository
-from app.core.hashing import hash_api_key
-from app.core.time import utc_now_iso
 
 
 def init_schema():
-    print("Initializing OpsMemory persistence layer...")
+    """Register demo tenants (hashed keys) and idempotently create FalkorDB indexes/agents per tenant graph."""
+    print("Initializing OpsMemory FalkorDB schema...")
     repo = get_memory_repository()
-    settings = get_settings()
-
-    # Pre-seed control tenants in SQLite
-    with repo._get_sqlite_con() as con:
-        cur = con.cursor()
-        now = utc_now_iso()
-        tenants = [
-            ("acme", hash_api_key("key_acme_secret"), settings.tenant_graph_name("acme")),
-            ("beta", hash_api_key("key_beta_secret"), settings.tenant_graph_name("beta")),
-        ]
-        for t_id, key_h, g_name in tenants:
-            cur.execute("""
-                INSERT INTO tenants (tenant_id, api_key_hash, graph_name, created_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(tenant_id) DO UPDATE SET
-                    api_key_hash=excluded.api_key_hash,
-                    graph_name=excluded.graph_name
-            """, (t_id, key_h, g_name, now))
-        con.commit()
-
-    # Idempotently initialize FalkorDB indexes for tenant graphs
-    for t_id, _, _ in tenants:
-        repo.init_tenant_schema(t_id)
-
     health = repo.check_health()
-    print(f"Schema initialized. Health status: {health}")
+    if not health["ok"]:
+        print(f"FalkorDB is unreachable: {health}")
+        return 1
+    # Demo keys for local use. Override via env; never ship the defaults to production.
+    tenants = [
+        ("acme", os.environ.get("OPSMEMORY_KEY_ACME", "key_acme_secret")),
+        ("beta", os.environ.get("OPSMEMORY_KEY_BETA", "key_beta_secret")),
+        ("gamma", os.environ.get("OPSMEMORY_KEY_GAMMA", "key_gamma_secret")),  # hold-out tenant
+    ]
+    for tenant_id, api_key in tenants:
+        repo.register_tenant(tenant_id, api_key)
+        repo.init_tenant_schema(tenant_id)
+    print(f"Schema initialized. Health status: {repo.check_health()}")
     return 0
 
 

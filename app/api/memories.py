@@ -43,4 +43,6 @@ async def delete_memory(
     repo: MemoryRepository = Depends(get_memory_repository)
 ) -> Dict[str, Any]:
     ok = repo.delete_memory(context, memory_id, hard_delete=hard)
-    return {"success": ok, "memory_id": memory_id, "deleted": True}
+    if not ok:
+        raise ResourceNotFoundError(f"Memory '{memory_id}' not found")
+    return {"success": True, "memory_id": memory_id, "deleted": True}

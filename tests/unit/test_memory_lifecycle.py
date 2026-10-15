@@ -88,3 +88,27 @@ def test_deletion_removes_from_fts(repo, context_acme):
     # Search FTS should not find it
     fts_res_after = repo.search_fts(context_acme, "xyz987")
     assert len(fts_res_after) == 0
+
+
+def test_newer_fact_supersedes_older_even_with_lower_confidence(repo, context_acme):
+    from app.memory.lifecycle import MemoryLifecycle
+    from app.memory.conflicts import CONFIDENCE_MAP
+    lc = MemoryLifecycle(repo)
+    old = lc.store_memory(context_acme, "semantic", "version", "payments-api version",
+                          "payments-api is on v2.4", ["payments-api"], confidence_basis="user_correction")
+    assert CONFIDENCE_MAP["user_correction"] > CONFIDENCE_MAP["user_explicit"]
+    new = lc.store_memory(context_acme, "semantic", "version", "payments-api version v2.5",
+                          "payments-api is on v2.5", ["payments-api"], confidence_basis="user_explicit")
+    assert new.status == "active"
+    active = repo.list_memories(context_acme, status="active", memory_type="semantic")
+    assert [m.summary for m in active if "payments-api" in m.entities and m.subtype == "version"] == ["payments-api is on v2.5"]
+
+
+def test_weak_inference_does_not_overwrite_strong_fact(repo, context_acme):
+    from app.memory.lifecycle import MemoryLifecycle
+    lc = MemoryLifecycle(repo)
+    lc.store_memory(context_acme, "semantic", "version", "payments-api version",
+                    "payments-api is on v2.4", ["payments-api"], confidence_basis="user_correction")
+    weak = lc.store_memory(context_acme, "semantic", "version", "payments-api version guess",
+                           "payments-api is on v9.9", ["payments-api"], confidence_basis="agent_inference")
+    assert weak.status == "conflicted"

@@ -1,8 +1,11 @@
 """Application configuration using Pydantic Settings."""
 import os
+import re
 from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+TENANT_ID_RE = re.compile(r"[a-z0-9_]{1,48}")
 
 
 class Settings(BaseSettings):
@@ -37,8 +40,9 @@ class Settings(BaseSettings):
     FALKORDB_PASSWORD: Optional[str] = None
     FALKORDB_TIMEOUT_SECONDS: float = 3.0
 
-    # SQLite persistence & FTS
-    SQLITE_DB_PATH: str = "opsmemory.db"
+    # Auth
+    # Admin endpoints (/v1/admin/*) are disabled unless this is set. Send it as X-Admin-Key.
+    ADMIN_API_KEY: Optional[str] = None
 
     # Retrieval
     ENABLE_EMBEDDINGS: bool = True
@@ -50,11 +54,17 @@ class Settings(BaseSettings):
         return self.GOOGLE_API_KEY or self.GEMINI_API_KEY or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
     def tenant_graph_name(self, tenant_id: str) -> str:
-        """Derive server-side FalkorDB graph name for tenant."""
-        clean_tenant = "".join(c for c in tenant_id.lower() if c.isalnum() or c == "_")
-        if not clean_tenant:
-            raise ValueError(f"Invalid tenant_id '{tenant_id}'")
-        return f"tenant_{clean_tenant}"
+        """Derive server-side FalkorDB graph name for tenant.
+
+        Strict on purpose: tenant ids must already be in canonical form
+        ([a-z0-9_], 1-48 chars). We reject instead of normalizing, because
+        normalizing makes 'acme-corp', 'acmecorp' and 'Acme.Corp' share one graph.
+        """
+        if not isinstance(tenant_id, str) or not TENANT_ID_RE.fullmatch(tenant_id):
+            raise ValueError(
+                f"Invalid tenant_id {tenant_id!r}: use 1-48 chars from [a-z0-9_]"
+            )
+        return f"tenant_{tenant_id}"
 
 
 _settings: Optional[Settings] = None

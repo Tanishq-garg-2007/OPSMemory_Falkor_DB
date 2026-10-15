@@ -13,5 +13,24 @@ services:
       timeout: 3s
       retries: 5
 
+  # Optional: run the API in a container too (`docker compose up -d --build`).
+  # For local development you can start only falkordb and run uvicorn on the host.
+  app:
+    build: .
+    container_name: opsmemory-app
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      REAL_LLM: ${REAL_LLM:-0}
+    restart: unless-stopped
+
 volumes:
   falkordb_data:

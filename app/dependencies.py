@@ -1,9 +1,10 @@
 """FastAPI dependency injection and tenant context."""
+import hmac
 from dataclasses import dataclass
 from typing import Optional
 from fastapi import Header, Depends
 from app.config import Settings, get_settings
-from app.errors import AuthenticationError, TenantIsolationError
+from app.errors import AuthenticationError, TenantIsolationError, OpsMemoryError
 
 
 @dataclass(frozen=True)
@@ -20,38 +21,41 @@ class TenantContext:
             )
 
 
-# Local development pre-seeded keys mapping
-DEVELOPMENT_TENANT_KEYS = {
-    "key_acme_secret": "acme",
-    "key_beta_secret": "beta",
-    "dev-key-acme": "acme",
-    "dev-key-beta": "beta",
-    "test_acme_key": "acme",
-    "test_beta_key": "beta",
-}
-
-
 async def get_tenant_context(
     x_tenant_key: Optional[str] = Header(None, alias="X-Tenant-Key"),
-    settings: Settings = Depends(get_settings),
 ) -> TenantContext:
-    """Validate tenant key and derive tenant context."""
+    """Validate the tenant key against the tenants table (SHA-256 hashed keys only).
+
+    No prefix shortcuts and no hardcoded dev keys: a key works only if it was
+    registered via MemoryRepository.register_tenant (see scripts/init_schema.py).
+    """
     if not x_tenant_key:
         raise AuthenticationError("Missing X-Tenant-Key header")
 
-    tenant_id = DEVELOPMENT_TENANT_KEYS.get(x_tenant_key)
-    if not tenant_id:
-        # Check if key is formatted as tenant:<id> or direct key
-        if x_tenant_key.startswith("tenant_key_"):
-            tenant_id = x_tenant_key[len("tenant_key_"):]
-        elif x_tenant_key.startswith("test_") and x_tenant_key.endswith("_key"):
-            tenant_id = x_tenant_key[5:-4]
-        else:
-            raise AuthenticationError("Invalid X-Tenant-Key")
+    # Imported here to avoid a circular import (repository imports TenantContext).
+    from app.memory.repository import get_memory_repository
 
-    graph_name = settings.tenant_graph_name(tenant_id)
+    tenant = get_memory_repository().find_tenant_by_api_key(x_tenant_key)
+    if not tenant:
+        raise AuthenticationError("Invalid X-Tenant-Key")
+
     return TenantContext(
-        tenant_id=tenant_id,
-        graph_name=graph_name,
-        api_key_name=x_tenant_key
+        tenant_id=tenant["tenant_id"],
+        graph_name=tenant["graph_name"],
+        api_key_name="tenant_key",  # never keep the raw key around
     )
+
+
+async def require_admin(
+    x_admin_key: Optional[str] = Header(None, alias="X-Admin-Key"),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Guard for /v1/admin/*. Disabled entirely unless ADMIN_API_KEY is configured."""
+    if not settings.ADMIN_API_KEY:
+        raise OpsMemoryError(
+            "Admin API is disabled: set ADMIN_API_KEY to enable it", status_code=403
+        )
+    if not x_admin_key or not hmac.compare_digest(
+        x_admin_key.encode(), settings.ADMIN_API_KEY.encode()
+    ):
+        raise AuthenticationError("Invalid or missing X-Admin-Key")

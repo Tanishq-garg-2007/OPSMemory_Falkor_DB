@@ -25,6 +25,9 @@ dev = [
     "pytest-asyncio>=0.23.0"
 ]
 
+[tool.setuptools.packages.find]
+include = ["app*", "eval*", "scripts*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

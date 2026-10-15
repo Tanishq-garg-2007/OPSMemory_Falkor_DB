@@ -25,6 +25,20 @@ def compute_combined_confidence(confidences: List[float]) -> float:
     return min(1.0 - prod, 0.98)
 
 
+# A newer fact replaces an older one, unless the newer source is clearly weaker
+# (e.g. an agent_inference at 0.55 must not overwrite a user_correction at 0.95).
+SUPERSESSION_CONFIDENCE_MARGIN = 0.20
+
+
+def should_supersede(existing: MemoryModel, incoming: MemoryModel) -> bool:
+    """Recency wins by default; low-confidence sources cannot overwrite strong ones.
+
+    Comparing raw confidence alone (incoming >= existing) was wrong: a fresh
+    user statement at 0.90 could never replace an older fact stored at 0.95.
+    """
+    return incoming.confidence >= existing.confidence - SUPERSESSION_CONFIDENCE_MARGIN
+
+
 def detect_semantic_conflict(existing: MemoryModel, incoming: MemoryModel) -> bool:
     """
     Detect if two memories represent conflicting facts on the same entity/predicate.

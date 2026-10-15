@@ -12,6 +12,7 @@ from app.dependencies import TenantContext
 from app.memory.repository import get_memory_repository
 from app.agents.coordinator import get_coordinator
 from eval.dataset.fixtures import seed_fixtures_for_tenant, reset_tenant_data
+from eval.dataset.holdout_fixtures import seed_holdout_fixtures, HOLDOUT_TENANT
 from eval.metrics import evaluate_case
 
 
@@ -31,7 +32,8 @@ async def run_benchmark(
     suite: str = "all",
     max_concurrency: int = 5,
     output_dir: str = "reports",
-    real_llm: bool = False
+    real_llm: bool = False,
+    dataset: str = "benchmark",
 ):
     print(f"================================================================")
     print(f"OpsMemory Benchmark Suite: {suite.upper()} (REAL_LLM={1 if real_llm else 0})")
@@ -45,15 +47,20 @@ async def run_benchmark(
     repo = get_memory_repository()
     coordinator = get_coordinator()
 
-    # Seed tenants
-    print("Preparing and seeding tenant fixtures (acme, beta)...")
-    for t in ["acme", "beta"]:
-        ctx = TenantContext(tenant_id=t, graph_name=f"tenant_{t}")
+    # Seed tenants. "holdout" = unseen tenant/fixtures/questions, to measure generalisation.
+    is_holdout = dataset == "holdout"
+    tenants = [HOLDOUT_TENANT] if is_holdout else ["acme", "beta"]
+    print(f"Preparing and seeding tenant fixtures ({', '.join(tenants)})...")
+    for t in tenants:
+        ctx = TenantContext(tenant_id=t, graph_name=get_settings().tenant_graph_name(t))
+        if is_holdout:
+            repo.init_tenant_schema(t)
         reset_tenant_data(ctx, repo)
-        seed_fixtures_for_tenant(ctx, repo)
+        (seed_holdout_fixtures if is_holdout else seed_fixtures_for_tenant)(ctx, repo)
 
     # Load dataset
-    dataset_path = os.path.join(os.path.dirname(__file__), "dataset", "questions.jsonl")
+    dataset_file = "holdout_questions.jsonl" if is_holdout else "questions.jsonl"
+    dataset_path = os.path.join(os.path.dirname(__file__), "dataset", dataset_file)
     cases = load_dataset(dataset_path, suite)
     print(f"Loaded {len(cases)} test cases for suite '{suite}'.")
 
@@ -64,7 +71,7 @@ async def run_benchmark(
         async with sem:
             ctx = TenantContext(
                 tenant_id=case["tenant_id"],
-                graph_name=f"tenant_{case['tenant_id']}",
+                graph_name=get_settings().tenant_graph_name(case['tenant_id']),
                 api_key_name=case.get("api_key_name", "key_acme_secret")
             )
             start_t = time.perf_counter()
@@ -123,14 +130,16 @@ async def run_benchmark(
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     os.makedirs(output_dir, exist_ok=True)
 
-    json_path = os.path.join(output_dir, f"benchmark_{timestamp}.json")
-    csv_path = os.path.join(output_dir, f"benchmark_{timestamp}.csv")
-    md_path = os.path.join(output_dir, f"benchmark_summary_{timestamp}.md")
+    prefix = "holdout" if is_holdout else "benchmark"
+    json_path = os.path.join(output_dir, f"{prefix}_{timestamp}.json")
+    csv_path = os.path.join(output_dir, f"{prefix}_{timestamp}.csv")
+    md_path = os.path.join(output_dir, f"{prefix}_summary_{timestamp}.md")
 
     # Write JSON
     report_data = {
         "timestamp": timestamp,
         "suite": suite,
+        "dataset": dataset,
         "real_llm": real_llm,
         "summary": {
             "total_cases": total,
@@ -163,6 +172,7 @@ async def run_benchmark(
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(f"# OpsMemory Benchmark Report\n\n")
         f.write(f"- **Timestamp:** {timestamp}\n")
+        f.write(f"- **Dataset:** {dataset}\n")
         f.write(f"- **Suite:** {suite}\n")
         f.write(f"- **Model Mode:** {'Live Google Gemma' if real_llm else 'Deterministic Mock'}\n")
         f.write(f"- **Overall Accuracy:** {accuracy:.1f}% ({passed}/{total})\n")
@@ -197,13 +207,16 @@ def main():
     parser.add_argument("--max-concurrency", type=int, default=5)
     parser.add_argument("--output-dir", default="reports")
     parser.add_argument("--real-llm", action="store_true")
+    parser.add_argument("--dataset", choices=["benchmark", "holdout"], default="benchmark",
+                        help="benchmark = 88 bundled questions (acme/beta); holdout = unseen tenant 'gamma'")
     args = parser.parse_args()
 
     code = asyncio.run(run_benchmark(
         suite=args.suite,
         max_concurrency=args.max_concurrency,
         output_dir=args.output_dir,
-        real_llm=args.real_llm
+        real_llm=args.real_llm,
+        dataset=args.dataset,
     ))
     sys.exit(code)
 

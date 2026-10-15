@@ -4,10 +4,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import asyncio
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from app.config import get_settings
 
 
 async def run_smoke():
     print("Starting OpsMemory E2E HTTP Smoke Test...")
+    admin_key = get_settings().ADMIN_API_KEY or os.environ.get("ADMIN_API_KEY")
+    assert admin_key, "Set ADMIN_API_KEY (in .env or the environment): /v1/admin/* is disabled without it"
+    admin_headers = {"X-Admin-Key": admin_key}
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         # 1. Health check
@@ -17,7 +21,7 @@ async def run_smoke():
         print(f"  [PASS] /healthz returned 200 (mode: {health_data['database']['mode']})")
 
         # 2. Seed Acme fixtures
-        res = await client.post("/v1/admin/seed?tenant_id=acme")
+        res = await client.post("/v1/admin/seed?tenant_id=acme", headers=admin_headers)
         assert res.status_code == 200, f"Seed failed: {res.status_code}"
         print(f"  [PASS] /v1/admin/seed seeded Acme fixtures successfully")
 
@@ -46,7 +50,7 @@ async def run_smoke():
 
         # 6. Tenant Isolation check: Acme cannot see Beta data
         beta_headers = {"X-Tenant-Key": "key_beta_secret"}
-        await client.post("/v1/admin/seed?tenant_id=beta")
+        await client.post("/v1/admin/seed?tenant_id=beta", headers=admin_headers)
         leak_check = await client.post("/v1/chat", headers=headers, json={"message": "What is Beta Secret Database Password?"})
         leak_data = leak_check.json()
         assert "beta-secret-pw-999" not in leak_data["answer"], "CRITICAL: Cross-tenant leakage detected!"

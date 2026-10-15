@@ -9,12 +9,23 @@ from app.retrieval.service import RetrievalService
 from eval.dataset.fixtures import seed_fixtures_for_tenant, reset_tenant_data
 
 
+@pytest.fixture(autouse=True)
+def _force_mock_llm():
+    """Tests must be offline and deterministic whatever .env says (REAL_LLM=1 + a key would call the real API)."""
+    from app.config import get_settings
+    from app.llm import reset_llm_client
+    s = get_settings()
+    saved = (s.REAL_LLM, s.LLM_PROVIDER)
+    s.REAL_LLM, s.LLM_PROVIDER = 0, "mock"
+    reset_llm_client()
+    yield
+    s.REAL_LLM, s.LLM_PROVIDER = saved
+    reset_llm_client()
+
+
 @pytest.fixture(scope="session")
-def test_settings(tmp_path_factory):
-    temp_dir = tmp_path_factory.mktemp("db")
-    db_path = str(temp_dir / "test_opsmemory.db")
+def test_settings():
     return Settings(
-        SQLITE_DB_PATH=db_path,
         REAL_LLM=0,
         LLM_PROVIDER="mock",
         FALKORDB_HOST="localhost",

@@ -2,6 +2,7 @@
 from typing import List, Dict, Any, Optional
 from app.dependencies import TenantContext
 from app.memory.lifecycle import MemoryLifecycle
+from app.memory.signals import is_inquiry
 from app.memory.extraction import MemoryExtractor, ExtractionResult
 from app.memory.models import MemoryModel, TaskModel
 from app.tasks.task_board import TaskBoard, get_task_board
@@ -36,17 +37,8 @@ class TriageAgent:
         created_memories: List[MemoryModel] = []
         created_tasks: List[TaskModel] = []
 
-        # Salience filter: interrogative inquiries should not be stored as new memories/incidents
-        t = message.strip().lower()
-        inquiry_starters = (
-            "what", "who", "when", "where", "why", "how", "which",
-            "is ", "are ", "can ", "could ", "does ", "did ", "do ", "will ", "would ",
-            "should ", "show ", "tell ", "list ", "explain ", "describe ", "give me ", "contrast ", "identify "
-        )
-        is_inquiry = t.endswith("?") or any(t.startswith(s) for s in inquiry_starters)
-        declarative_override = any(dm in t for dm in ["we upgraded", "now updated", "setting to", "new version is", "incident occurred", "just failed", "outage ongoing"])
-
-        if is_inquiry and not declarative_override:
+        # Salience filter: questions and requests for information are never stored as memories.
+        if is_inquiry(message):
             return {
                 "source_id": source.id,
                 "created_memories": [],
@@ -55,7 +47,13 @@ class TriageAgent:
             }
 
         # 2. Extract candidates
-        extracted: ExtractionResult = await self.extractor.extract_candidates(message)
+        # Service names come from this tenant's graph, not a built-in list (None when the graph can't be read).
+        try:
+            known_services = [e.name for e in self.lifecycle.repo.list_entities(context, kind="service")]
+        except Exception as e:
+            logger.warning(f"Could not load known services: {e}")
+            known_services = None
+        extracted: ExtractionResult = await self.extractor.extract_candidates(message, known_services=known_services)
 
         # 3. Persist episodic memories
         for epi in extracted.episodic_memories:

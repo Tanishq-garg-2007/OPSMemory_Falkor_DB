@@ -479,29 +479,6 @@ def seed_fixtures_for_tenant(context: TenantContext, repo: Optional[MemoryReposi
 
 
 def reset_tenant_data(context: TenantContext, repo: Optional[MemoryRepository] = None) -> int:
+    """Delete every node and edge of the tenant's FalkorDB graph. Returns number of nodes deleted."""
     r = repo or get_memory_repository()
-    # Clean FalkorDB tenant graph
-    if getattr(r, "_falkor_connected", False) and r._falkor_client:
-        try:
-            graph = r._get_graph(context.graph_name)
-            graph.query("MATCH (n {tenant_id: $tenant_id}) DETACH DELETE n", {"tenant_id": context.tenant_id})
-            r.init_tenant_schema(context.tenant_id)
-        except Exception:
-            pass
-
-    # Delete all memories, tasks, entities, and sources for tenant in SQLite
-    count = 0
-    with r._get_sqlite_con() as con:
-        cur = con.cursor()
-        cur.execute("DELETE FROM memories WHERE tenant_id = ?", (context.tenant_id,))
-        count += cur.rowcount
-        cur.execute("DELETE FROM memory_fts WHERE tenant_id = ?", (context.tenant_id,))
-        cur.execute("DELETE FROM tasks WHERE tenant_id = ?", (context.tenant_id,))
-        cur.execute("DELETE FROM entities WHERE tenant_id = ?", (context.tenant_id,))
-        cur.execute("DELETE FROM sources WHERE tenant_id = ?", (context.tenant_id,))
-        cur.execute("DELETE FROM graph_edges WHERE tenant_id = ?", (context.tenant_id,))
-        cur.execute("DELETE FROM conversations WHERE tenant_id = ?", (context.tenant_id,))
-        con.commit()
-    from app.core.cache import get_cache
-    get_cache().invalidate_tenant(context.tenant_id)
-    return count
+    return r.delete_all_tenant_data(context)

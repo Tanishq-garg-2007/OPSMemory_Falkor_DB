@@ -1,6 +1,5 @@
 """Retrieval service orchestrating query understanding, candidate retrieval, fusion, and RAG."""
 import hashlib
-import re
 from typing import Optional
 from app.dependencies import TenantContext
 from app.retrieval.router import RetrievalRouter
@@ -9,6 +8,7 @@ from app.retrieval.fts import FTSSearcher
 from app.retrieval.vector import VectorSearcher
 from app.retrieval.fusion import RankFusion
 from app.retrieval.evidence import RAGEngine, AnswerResponse
+from app.retrieval.grounding import is_degenerate_query, has_grounding
 from app.memory.repository import MemoryRepository, get_memory_repository
 from app.core.cache import get_cache
 from app.core.concurrency import get_limiter, get_coalescer
@@ -39,21 +39,8 @@ class RetrievalService:
         return await self.coalescer.execute(coalesce_key, lambda: self._execute_retrieval(context, query, q_hash))
 
     async def _execute_retrieval(self, context: TenantContext, query: str, q_hash: str) -> AnswerResponse:
-        q_strip = query.strip()
-        alnum = re.sub(r'[^a-zA-Z0-9]', '', q_strip)
-        is_repetitive = len(alnum) > 30 and len(set(alnum)) < 4
-        is_cypher_inject = "detach delete" in query.lower() or query.lower().strip().startswith("match (n)")
-
-        if not q_strip or len(alnum) < 2 or is_repetitive or is_cypher_inject:
-            return AnswerResponse(
-                answer="I do not have sufficient recorded evidence in OpsMemory to answer this question accurately.",
-                citations=[],
-                confidence="low",
-                abstained=True,
-                follow_ups=["Please provide a valid question."],
-                evidence=[],
-                reasoning_paths=[]
-            )
+        if is_degenerate_query(query):
+            return self._abstain("Please provide a valid question.")
 
         async with self.limiter.retrieval_semaphore:
             # 1. Sub-millisecond Dynamic Semantic Vector Anchoring in FalkorDB
@@ -73,6 +60,16 @@ class RetrievalService:
             # 3. Fuse candidates
             ranked = self.fusion.fuse(intent, graph_candidates, fts_candidates, vector_candidates)
 
+            # Grounding gate: nothing we remember relates to this question, so do not let the LLM improvise.
+            # Only entities the question actually names count; vector anchors always return nearest
+            # neighbours, even for nonsense, so they say nothing about whether the question is grounded.
+            q_low = query.lower()
+            named = {e for e in intent.target_entities if e in q_low or e.replace("-", " ") in q_low}
+            top = [mem for mem, _ in ranked[:20]]
+            entity_hit = any(e in named for mem in top for e in mem.entities)
+            if not has_grounding(query, (f"{m.title} {m.summary}" for m in top), entity_hit=entity_hit):
+                return self._abstain("Would you like to record this information in OpsMemory?")
+
             # 4. Generate answer
             async with self.limiter.llm_semaphore:
                 response = await self.rag_engine.generate_answer(
@@ -82,6 +79,19 @@ class RetrievalService:
             # Cache response
             self.cache.set(context.tenant_id, q_hash, response, ttl=60.0)
             return response
+
+
+    @staticmethod
+    def _abstain(follow_up: str) -> AnswerResponse:
+        return AnswerResponse(
+            answer="I do not have sufficient recorded evidence in OpsMemory to answer this question accurately.",
+            citations=[],
+            confidence="low",
+            abstained=True,
+            follow_ups=[follow_up],
+            evidence=[],
+            reasoning_paths=[],
+        )
 
 
 _retrieval_service: Optional[RetrievalService] = None

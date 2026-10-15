@@ -30,6 +30,35 @@ class AnswerResponse(BaseModel):
     reasoning_paths: List[List[str]] = Field(default_factory=list)
 
 
+_CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+
+def evidence_confidence(items: List["PackedEvidenceItem"]) -> str:
+    """Confidence derived from the evidence itself, never a constant.
+
+    high   : the top item is active and well supported (stored confidence >= 0.8)
+    medium : the top item is active but weakly supported, or only superseded history was found
+    low    : nothing usable, or the top item is conflicted / expired / otherwise not trustworthy
+    """
+    if not items:
+        return "low"
+    top = items[0]
+    if top.status == "active":
+        return "high" if top.confidence >= 0.8 else "medium"
+    if top.status == "superseded":
+        return "medium"
+    return "low"
+
+
+def combine_confidence(llm_value: Optional[str], items: List["PackedEvidenceItem"]) -> str:
+    """The answer is never more confident than the evidence allows, whatever the LLM claims."""
+    derived = evidence_confidence(items)
+    given = (llm_value or "").lower()
+    if given not in _CONFIDENCE_ORDER:
+        return derived
+    return given if _CONFIDENCE_ORDER[given] <= _CONFIDENCE_ORDER[derived] else derived
+
+
 class EvidencePacker:
     """Packs top ranked memory candidates within a strict token budget."""
 
@@ -142,7 +171,7 @@ class RAGEngine:
             return AnswerResponse(
                 answer=raw_result.get("answer", "No answer generated."),
                 citations=clean_citations or [it.memory_id for it in packed_items[:2]],
-                confidence=raw_result.get("confidence", "high"),
+                confidence=combine_confidence(raw_result.get("confidence"), packed_items),
                 abstained=raw_result.get("abstained", False),
                 follow_ups=raw_result.get("follow_ups", []),
                 evidence=packed_items,
@@ -155,7 +184,7 @@ class RAGEngine:
                 return AnswerResponse(
                     answer=f"Based on persistent records: {top_item.summary}",
                     citations=[top_item.memory_id],
-                    confidence="high",
+                    confidence=evidence_confidence(packed_items),
                     abstained=False,
                     follow_ups=[],
                     evidence=packed_items,
@@ -165,7 +194,7 @@ class RAGEngine:
                 return AnswerResponse(
                     answer=f"Based on dependency topology: {'; '.join(graph_paths)}",
                     citations=[],
-                    confidence="high",
+                    confidence="medium",
                     abstained=False,
                     follow_ups=[],
                     evidence=[],
