@@ -39,6 +39,32 @@ async def test_api_endpoints_workflow():
         data = chat_res.json()
         assert "v2.4" in data["answer"]
         assert len(data["citations"]) > 0
+        assert "learned" in data
+        assert data["learned"]["created"] == []
+        assert data["learned"]["superseded"] == []
+        assert data["learned"]["tasks_created"] == []
+
+        # 4b. Chat with knowledge update
+        update_res = await client.post(
+            "/v1/chat",
+            headers=headers,
+            json={"message": "We upgraded payments-api to v2.5"}
+        )
+        assert update_res.status_code == 200
+        u_data = update_res.json()
+        assert "learned" in u_data
+        assert len(u_data["learned"]["created"]) > 0
+        assert len(u_data["learned"]["superseded"]) > 0
+
+        # 4c. Chat with multi-hop dependency query
+        hop_res = await client.post(
+            "/v1/chat",
+            headers=headers,
+            json={"message": "What does checkout-ui depend on?"}
+        )
+        assert hop_res.status_code == 200
+        h_data = hop_res.json()
+        assert len(h_data["reasoning_paths"]) > 0
 
         # 5. Conversation retrieval
         conv_id = data["conversation_id"]
@@ -51,7 +77,34 @@ async def test_api_endpoints_workflow():
         assert task_res.status_code == 200
         assert isinstance(task_res.json(), list)
 
-        # 7. UI check
+        # 7. Agent handoffs endpoint
+        handoffs_res = await client.get(f"/v1/agents/handoffs?conversation_id={conv_id}", headers=headers)
+        assert handoffs_res.status_code == 200
+        handoffs = handoffs_res.json()
+        assert isinstance(handoffs, list)
+        assert len(handoffs) > 0
+
+        # 8. Graph context contains handoff_count
+        ctx_res = await client.get("/v1/graph/context", headers=headers)
+        assert ctx_res.status_code == 200
+        ctx_data = ctx_res.json()
+        assert "handoff_count" in ctx_data
+        assert ctx_data["handoff_count"] > 0
+
+        # 9. Entity timeline
+        timeline_res = await client.get("/v1/entities/payments-api/timeline", headers=headers)
+        assert timeline_res.status_code == 200
+        timeline = timeline_res.json()
+        assert isinstance(timeline, list)
+        assert len(timeline) > 0
+        assert "valid_from" in timeline[0]
+        assert "status" in timeline[0]
+
+        # 10. Entity timeline 404 for nonexistent entity
+        missing_res = await client.get("/v1/entities/nonexistent-service/timeline", headers=headers)
+        assert missing_res.status_code == 404
+
+        # 11. UI check
         ui_res = await client.get("/ui/")
         assert ui_res.status_code == 200
         assert "OpsMemory" in ui_res.text
