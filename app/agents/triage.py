@@ -36,6 +36,7 @@ class TriageAgent:
 
         created_memories: List[MemoryModel] = []
         created_tasks: List[TaskModel] = []
+        self.lifecycle.last_superseded = []
 
         # Salience filter: questions and requests for information are never stored as memories.
         if is_inquiry(message):
@@ -43,6 +44,7 @@ class TriageAgent:
                 "source_id": source.id,
                 "created_memories": [],
                 "created_tasks": [],
+                "superseded_memories": [],
                 "missing_info": []
             }
 
@@ -138,5 +140,6 @@ class TriageAgent:
         return {
             "source_id": source.id,
             "created_memories": created_memories,
-            "created_tasks": created_tasks
+            "created_tasks": created_tasks,
+            "superseded_memories": list(self.lifecycle.last_superseded)
         }

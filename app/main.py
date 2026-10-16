@@ -11,6 +11,8 @@ from app.api.memories import router as mem_router
 from app.api.tasks import router as task_router
 from app.api.admin import router as admin_router
 from app.api.graph import router as graph_router
+from app.api.agents import router as agents_router
+from app.api.entities import router as entities_router
 from app.core.logging import get_logger
 import os
 
@@ -46,6 +48,8 @@ def create_app() -> FastAPI:
     app.include_router(task_router)
     app.include_router(admin_router)
     app.include_router(graph_router)
+    app.include_router(agents_router)
+    app.include_router(entities_router)
 
     # Mount static UI
     static_dir = os.path.join(os.path.dirname(__file__), "ui", "static")

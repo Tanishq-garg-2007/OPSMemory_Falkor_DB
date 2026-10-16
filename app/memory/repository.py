@@ -809,6 +809,82 @@ class MemoryRepository:
             updated_at=props.get("updated_at", utc_now_iso()),
         )
 
+    def list_conversations(
+        self,
+        context: TenantContext,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Return conversation summaries for the tenant, newest first.
+
+        Each row contains: id, created_at, preview (first user turn truncated to 80 chars),
+        and turn_count.  Tenant isolation is enforced by scoping all queries to context.tenant_id.
+        """
+        # Fetch Conversation nodes ordered by created_at DESC
+        res = self.run_query(context, """
+            MATCH (c:Conversation {tenant_id: $tid})
+            RETURN c.id, c.created_at
+            ORDER BY c.created_at DESC
+            SKIP $offset
+            LIMIT $limit
+        """, {"tid": context.tenant_id, "limit": limit, "offset": offset})
+
+        summaries: List[Dict[str, Any]] = []
+        for row in res.result_set:
+            conv_id = row[0]
+            created_at = row[1] or ""
+
+            # First user turn (preview)
+            turn_res = self.run_query(context, """
+                MATCH (s:Session {id: $sid, tenant_id: $tid})-[:HAS_TURN]->(t:Turn {role: 'user'})
+                RETURN t.content
+                ORDER BY t.created_at ASC
+                LIMIT 1
+            """, {"sid": conv_id, "tid": context.tenant_id})
+            preview = ""
+            if turn_res.result_set:
+                raw = turn_res.result_set[0][0] or ""
+                preview = raw[:80] + ("…" if len(raw) > 80 else "")
+
+            # Turn count
+            count_res = self.run_query(context, """
+                MATCH (s:Session {id: $sid, tenant_id: $tid})-[:HAS_TURN]->(t:Turn)
+                RETURN count(t)
+            """, {"sid": conv_id, "tid": context.tenant_id})
+            turn_count = int(count_res.result_set[0][0]) if count_res.result_set else 0
+
+            summaries.append({
+                "id": conv_id,
+                "created_at": created_at,
+                "preview": preview,
+                "turn_count": turn_count,
+            })
+        return summaries
+
+    def get_conversation_turns(
+        self,
+        context: TenantContext,
+        conversation_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Return all turns for a conversation/session in chronological order.
+
+        Scoped strictly to context.tenant_id to prevent cross-tenant leakage.
+        """
+        res = self.run_query(context, """
+            MATCH (s:Session {id: $sid, tenant_id: $tid})-[:HAS_TURN]->(t:Turn)
+            RETURN t.id, t.role, t.content, t.created_at
+            ORDER BY t.created_at ASC
+        """, {"sid": conversation_id, "tid": context.tenant_id})
+        return [
+            {
+                "id": row[0],
+                "role": row[1],
+                "content": row[2],
+                "created_at": row[3],
+            }
+            for row in res.result_set
+        ]
+
     def record_session_turn(
         self,
         context: TenantContext,
@@ -869,7 +945,9 @@ class MemoryRepository:
         task_id: str,
         reason: str,
         shared_state: Optional[Dict[str, Any]] = None,
-        memory_id: Optional[str] = None
+        memory_id: Optional[str] = None,
+        turn_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> None:
         """Persist an explicit multi-agent handoff edge."""
         tid = context.tenant_id
@@ -881,9 +959,11 @@ class MemoryRepository:
         self.run_query(context, """
             MATCH (a1:Agent {id: $from_id, tenant_id: $tid}), (a2:Agent {id: $to_id, tenant_id: $tid})
             CREATE (a1)-[h:HANDED_OFF_TO {task_id: $task_id, reason: $reason,
+                                          turn_id: $turn_id, conversation_id: $conv_id,
                                           shared_state_json: $state, timestamp: $now}]->(a2)
         """, {
             "from_id": from_agent, "to_id": to_agent, "task_id": task_id, "reason": reason,
+            "turn_id": turn_id or "", "conv_id": conversation_id or "",
             "state": json.dumps(shared_state or {}), "now": utc_now_iso(), "tid": tid,
         })
 
@@ -970,14 +1050,20 @@ class MemoryRepository:
     # ==========================
     # Graph inspection
     # ==========================
-    def get_recent_handoffs(self, context: TenantContext, limit: int = 10) -> List[Dict[str, Any]]:
-        res = self.run_query(context, """
+    def get_recent_handoffs(
+        self,
+        context: TenantContext,
+        conversation_id: Optional[str] = None,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        conv_filter = "AND h.conversation_id = $conv_id" if conversation_id else ""
+        res = self.run_query(context, f"""
             MATCH (a1:Agent)-[h:HANDED_OFF_TO]->(a2:Agent)
-            WHERE a1.tenant_id = $tid
-            RETURN a1.id, a2.id, h.task_id, h.reason, h.shared_state_json, h.timestamp
+            WHERE a1.tenant_id = $tid {conv_filter}
+            RETURN a1.id, a2.id, h.task_id, h.reason, h.shared_state_json, h.timestamp, h.turn_id, h.conversation_id
             ORDER BY h.timestamp DESC
             LIMIT $limit
-        """, {"tid": context.tenant_id, "limit": limit})
+        """, {"tid": context.tenant_id, "conv_id": conversation_id or "", "limit": limit})
         handoffs: List[Dict[str, Any]] = []
         for row in res.result_set:
             try:
@@ -987,6 +1073,7 @@ class MemoryRepository:
             handoffs.append({
                 "from_agent": row[0], "to_agent": row[1], "task_id": row[2],
                 "reason": row[3], "shared_state": state, "timestamp": row[5],
+                "turn_id": row[6] or None, "conversation_id": row[7] or None,
             })
         return handoffs
 
@@ -1001,6 +1088,7 @@ class MemoryRepository:
             "edge_counts": {},
             "recent_turns": [],
             "agent_handoffs": [],
+            "handoff_count": 0,
             "indexes": [],
         }
         for row in self.run_query(
@@ -1026,6 +1114,14 @@ class MemoryRepository:
             })
 
         data["agent_handoffs"] = self.get_recent_handoffs(context, limit=10)
+        handoff_count_res = self.run_query(
+            context,
+            "MATCH (a1:Agent {tenant_id: $tid})-[h:HANDED_OFF_TO]->(a2:Agent {tenant_id: $tid}) RETURN count(h)",
+            {"tid": tid}
+        )
+        handoff_count = int(handoff_count_res.result_set[0][0]) if handoff_count_res.result_set else 0
+        data["handoff_count"] = handoff_count
+        data["edge_counts"]["HANDED_OFF_TO"] = handoff_count
 
         for row in self.run_query(context, "CALL db.indexes()").result_set:
             data["indexes"].append({
@@ -1035,6 +1131,54 @@ class MemoryRepository:
                 "status": row[7] if len(row) > 7 else "UNKNOWN",
             })
         return data
+
+    def get_entity_timeline(
+        self,
+        context: TenantContext,
+        entity_id: str,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Return chronological memory timeline for an entity linked via ABOUT.
+
+        Returns None if the entity does not exist for the tenant.
+        """
+        tid = context.tenant_id
+        ent_res = self.run_query(context, """
+            MATCH (e:Entity {tenant_id: $tid})
+            WHERE e.id = $eid OR toLower(e.name) = toLower($eid)
+            RETURN e LIMIT 1
+        """, {"tid": tid, "eid": entity_id})
+        if not ent_res.result_set:
+            return None
+
+        mem_res = self.run_query(context, """
+            MATCH (m:Memory {tenant_id: $tid})-[:ABOUT]->(e:Entity {tenant_id: $tid})
+            WHERE e.id = $eid OR toLower(e.name) = toLower($eid)
+            OPTIONAL MATCH (m)-[:SUPERSEDES]->(old:Memory)
+            OPTIONAL MATCH (new:Memory)-[:SUPERSEDES]->(m)
+            RETURN m, old.id, new.id
+            ORDER BY m.valid_from ASC, m.created_at ASC
+        """, {"tid": tid, "eid": entity_id})
+
+        timeline = []
+        seen = set()
+        for row in mem_res.result_set:
+            mem = self._node_to_memory(row[0])
+            if mem.id in seen:
+                continue
+            seen.add(mem.id)
+            old_id = row[1]
+            new_id = row[2]
+            timeline.append({
+                "id": mem.id,
+                "title": mem.title,
+                "summary": mem.summary,
+                "valid_from": mem.valid_from,
+                "valid_to": mem.valid_to,
+                "status": mem.status,
+                "supersedes": mem.supersedes_id or (old_id if old_id else None),
+                "superseded_by": mem.superseded_by or (new_id if new_id else None),
+            })
+        return timeline
 
 
 _repo: Optional[MemoryRepository] = None

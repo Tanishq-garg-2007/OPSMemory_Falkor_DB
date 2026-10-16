@@ -16,6 +16,28 @@ from app.core.logging import get_logger
 logger = get_logger("coordinator")
 
 
+class LearnedCreatedItem(BaseModel):
+    id: str
+    title: str
+
+
+class LearnedSupersededItem(BaseModel):
+    old_id: str
+    new_id: str
+    title: str
+
+
+class LearnedTaskItem(BaseModel):
+    id: str
+    task_type: str
+
+
+class LearnedData(BaseModel):
+    created: List[LearnedCreatedItem] = Field(default_factory=list)
+    superseded: List[LearnedSupersededItem] = Field(default_factory=list)
+    tasks_created: List[LearnedTaskItem] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     conversation_id: str
     answer: str
@@ -26,6 +48,7 @@ class ChatResponse(BaseModel):
     confidence: str = "medium"
     reasoning_paths: List[List[str]] = Field(default_factory=list)
     agent_handoffs: List[Dict[str, Any]] = Field(default_factory=list)
+    learned: LearnedData = Field(default_factory=LearnedData)
 
 
 class Coordinator:
@@ -116,8 +139,68 @@ class Coordinator:
             content=rag_response.answer
         )
 
-        # 5. Pack final response
-        recent_handoffs = self.repo.get_recent_handoffs(context, limit=10)
+        # 5. Record ordered handoff chain: Triage -> Resolver -> Curator
+        triage_task_id = created_tasks[0].id if created_tasks else f"task_triage_{msg_id}"
+        resolve_task_id = None
+        for t in created_tasks:
+            if t.task_type == "RESOLVE_INCIDENT":
+                resolve_task_id = t.id
+                break
+        if not resolve_task_id:
+            resolve_task_id = f"task_resolve_{msg_id}"
+
+        curate_task_id = None
+        for t in created_tasks:
+            if t.task_type == "CURATE_MEMORY":
+                curate_task_id = t.id
+                break
+        if not curate_task_id:
+            curate_task_id = f"task_curate_{msg_id}"
+
+        self.repo.record_agent_handoff(
+            context=context,
+            from_agent="agent_triage",
+            to_agent="agent_resolver",
+            task_id=resolve_task_id,
+            reason="incident_triage" if any(t.task_type == "RESOLVE_INCIDENT" for t in created_tasks) else "query_resolution",
+            shared_state={"task_id": resolve_task_id, "triage_task": triage_task_id, "status": "triaged"},
+            turn_id=asst_turn_id,
+            conversation_id=effective_conv_id
+        )
+
+        self.repo.record_agent_handoff(
+            context=context,
+            from_agent="agent_resolver",
+            to_agent="agent_curator",
+            task_id=curate_task_id,
+            reason="memory_curation",
+            shared_state={"task_id": curate_task_id, "confidence": rag_response.confidence, "status": "resolved"},
+            turn_id=asst_turn_id,
+            conversation_id=effective_conv_id
+        )
+
+        try:
+            self.curator_agent.curator.curate_tenant(context)
+        except Exception as e:
+            logger.warning(f"Curator cycle error: {e}")
+
+        # 6. Pack final response
+        learned_created = [{"id": m.id, "title": m.title} for m in triage_res.get("created_memories", [])]
+        for task_info in resolved_task_info:
+            res_dict = task_info.get("result")
+            if isinstance(res_dict, dict) and "created_memory" in res_dict:
+                learned_created.append(res_dict["created_memory"])
+
+        learned_superseded = triage_res.get("superseded_memories", [])
+        learned_tasks = [{"id": t.id, "task_type": t.task_type} for t in created_tasks]
+
+        learned = LearnedData(
+            created=[LearnedCreatedItem(**c) for c in learned_created],
+            superseded=[LearnedSupersededItem(**s) for s in learned_superseded],
+            tasks_created=[LearnedTaskItem(**t) for t in learned_tasks],
+        )
+
+        recent_handoffs = self.repo.get_recent_handoffs(context, conversation_id=effective_conv_id, limit=10)
         return ChatResponse(
             conversation_id=effective_conv_id,
             answer=rag_response.answer,
@@ -127,7 +210,8 @@ class Coordinator:
             abstained=rag_response.abstained,
             confidence=rag_response.confidence,
             reasoning_paths=rag_response.reasoning_paths,
-            agent_handoffs=recent_handoffs
+            agent_handoffs=recent_handoffs,
+            learned=learned
         )
 
 
