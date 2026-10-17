@@ -3,7 +3,7 @@ services:
     name: opsmemory
     runtime: python
     buildCommand: pip install .
-    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: python scripts/seed.py --tenant all || true && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
@@ -16,7 +16,7 @@ services:
       - key: REAL_LLM
         value: "1"
       - key: ADMIN_API_KEY
-        value: test_admin_secret
+        value: key_acme_secret
       - key: GROQ_API_KEY
         sync: false
       - key: GOOGLE_API_KEY
