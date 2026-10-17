@@ -1,90 +1,24 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OpsMemory | Persistent Temporal Memory & Coordination</title>
-  <link rel="stylesheet" href="/ui/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Courier+Prime:wght@400;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("opsmemory-theme"); } catch (e) {}
+      if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+  <script type="module" crossorigin src="/ui/assets/index-Bu_a1fZ1.js"></script>
+  <link rel="stylesheet" crossorigin href="/ui/assets/index-fkr-viL5.css">
 </head>
 <body>
-  <div class="app-layout">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="header-left">
-        <div class="logo-badge">⚡ OpsMemory</div>
-        <span class="version-tag">v0.1.0</span>
-      </div>
-      <div class="header-right">
-        <label for="tenant-select" class="tenant-label">Tenant:</label>
-        <select id="tenant-select" class="tenant-select">
-          <option value="key_acme_secret" selected>Acme Corp (acme)</option>
-          <option value="key_beta_secret">Beta Labs (beta)</option>
-        </select>
-        <button id="btn-seed" class="btn btn-secondary">Seed Fixtures</button>
-        <button id="btn-reset" class="btn btn-outline">Reset Data</button>
-        <div id="health-indicator" class="status-indicator">
-          <span class="status-dot"></span>
-          <span id="health-text">Checking...</span>
-        </div>
-      </div>
-    </header>
-
-    <!-- Main Workspace Grid -->
-    <main class="main-grid">
-      <!-- Left: Chat & Coordination Panel -->
-      <section class="panel chat-panel" aria-labelledby="chat-heading">
-        <div class="panel-header">
-          <h2 id="chat-heading">Conversation & Incident Triage</h2>
-          <span id="conv-badge" class="badge">Session Active</span>
-        </div>
-        <div id="chat-messages" class="chat-messages">
-          <div class="message system-message">
-            <p>Welcome to <strong>OpsMemory</strong>. You can ask about prior incidents (e.g. <code>inc-101</code>), query current service facts, runbooks, or report new incidents.</p>
-          </div>
-        </div>
-        <form id="chat-form" class="chat-input-bar">
-          <input type="text" id="chat-input" placeholder="Type incident details, questions, or updates..." autocomplete="off" required>
-          <button type="submit" id="chat-submit-btn" class="btn btn-primary">Send</button>
-        </form>
-      </section>
-
-      <!-- Center: Evidence & Citations Panel -->
-      <section class="panel evidence-panel" aria-labelledby="evidence-heading">
-        <div class="panel-header">
-          <h2 id="evidence-heading">Retrieved Evidence & Citations</h2>
-          <span id="evidence-count" class="badge">0 records</span>
-        </div>
-        <div id="evidence-list" class="evidence-list">
-          <div class="empty-state">No query executed yet. Ask a question to inspect retrieved memories.</div>
-        </div>
-      </section>
-
-      <!-- Right: Task Board & Graph Inspector -->
-      <section class="panel tasks-graph-panel" aria-labelledby="tasks-heading">
-        <div class="panel-header tabs-header">
-          <button id="tab-tasks" class="tab-btn active">Task Board</button>
-          <button id="tab-graph" class="tab-btn">Memory Inspector</button>
-        </div>
-
-        <div id="tasks-content" class="tab-content active">
-          <div class="task-controls">
-            <button id="btn-refresh-tasks" class="btn btn-sm">Refresh Tasks</button>
-          </div>
-          <div id="tasks-list" class="tasks-list">
-            <div class="empty-state">No active coordination tasks.</div>
-          </div>
-        </div>
-
-        <div id="graph-content" class="tab-content">
-          <div class="inspector-controls">
-            <button id="btn-refresh-memories" class="btn btn-sm">Load All Memories</button>
-          </div>
-          <pre id="memory-inspector" class="memory-inspector">Select a memory or click 'Load All' to inspect graph JSON.</pre>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <script src="/ui/app.js"></script>
+  <div id="root"></div>
 </body>
 </html>

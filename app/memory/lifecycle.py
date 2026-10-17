@@ -18,6 +18,7 @@ class MemoryLifecycle:
     def __init__(self, repo: Optional[MemoryRepository] = None):
         self.repo = repo or get_memory_repository()
         self.resolver = EntityResolver(self.repo)
+        self.last_superseded: List[Dict[str, str]] = []
 
     def record_source(
         self,
@@ -110,6 +111,11 @@ class MemoryLifecycle:
                     superseded_by=incoming.id
                 )
                 incoming.supersedes_id = old_mem.id
+                self.last_superseded.append({
+                    "old_id": old_mem.id,
+                    "new_id": incoming.id,
+                    "title": old_mem.title,
+                })
             else:
                 # Incoming is a clearly weaker source than what we already trust.
                 incoming.status = "conflicted"

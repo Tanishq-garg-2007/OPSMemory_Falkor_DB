@@ -82,7 +82,7 @@ class ResolverAgent:
         try:
             from app.memory.lifecycle import MemoryLifecycle
             lifecycle = MemoryLifecycle(self.task_board.repo)
-            lifecycle.store_memory(
+            proc_mem = lifecycle.store_memory(
                 context=context,
                 memory_type="procedural",
                 subtype="post_incident_runbook",
@@ -91,6 +91,7 @@ class ResolverAgent:
                 entity_names=entities,
                 confidence_basis="agent_inference"
             )
+            result["created_memory"] = {"id": proc_mem.id, "title": proc_mem.title}
         except Exception as e:
             logger.warning(f"Post-incident curation error: {e}")
 
