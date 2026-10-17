@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { getAgentHandoffs, getTopology, getEntityTimeline } from "../api.js";
 
 export default function SidePanel({
@@ -42,11 +42,12 @@ export default function SidePanel({
     }
   }, [tenantKey, conversationId]);
 
+  // Only trigger once when switching into the 'agents' tab or when tenantKey changes
   useEffect(() => {
-    if (tab === "agents" && (!handoffs || handoffs.length === 0)) {
+    if (tab === "agents") {
       loadHandoffs();
     }
-  }, [tab, loadHandoffs, handoffs]);
+  }, [tab, tenantKey, conversationId, loadHandoffs]);
 
   // Load entities for timeline dropdown dynamically from live graph topology
   const loadEntities = useCallback(() => {
@@ -62,6 +63,7 @@ export default function SidePanel({
       })
       .catch(() => {
         setEntities([]);
+        setSelectedEntity(null);
       });
   }, [tenantKey]);
 
@@ -202,7 +204,10 @@ export default function SidePanel({
         </div>
         <div className="agents-view">
           {!hasHandoffs ? (
-            <div className="page-note">No handoffs recorded yet. Send a message to see the Triage &rarr; Resolver &rarr; Curator handoff flow.</div>
+            <div className="page-note">
+              No handoffs recorded in this session yet.<br /><br />
+              Send a message (e.g. report an incident or ask a question) to see the live <strong>Triage &rarr; Resolver &rarr; Curator</strong> handoff chain.
+            </div>
           ) : (
             <>
               <div className="agent-relay">
@@ -257,13 +262,17 @@ export default function SidePanel({
           <label className="tenant-label" htmlFor="timeline-entity-select">Entity:</label>
           <select
             id="timeline-entity-select"
-            className="tenant-select"
+            className="tenant-select timeline-select"
             value={selectedEntity || ""}
             onChange={(e) => setSelectedEntity(e.target.value)}
           >
-            {entities.map((e) => (
-              <option key={e.id} value={e.id}>{e.label || e.name || e.id}</option>
-            ))}
+            {entities.length === 0 ? (
+              <option value="" disabled>No entities in graph</option>
+            ) : (
+              entities.map((e) => (
+                <option key={e.id} value={e.id}>{e.label || e.name || e.id}</option>
+              ))
+            )}
           </select>
           <button className="btn btn-secondary btn-sm" onClick={() => { loadEntities(); loadTimeline(); }} style={{ marginLeft: "auto" }}>
             Refresh
@@ -272,7 +281,11 @@ export default function SidePanel({
         <div className="tasks-list">
           {timelineLoading && <div className="page-note">Loading timeline…</div>}
           {!timelineLoading && timeline.length === 0 && (
-            <div className="page-note">No memories linked to this entity in the FalkorDB graph.</div>
+            <div className="page-note">
+              {entities.length === 0 
+                ? "No entities seeded for this tenant. Go to Admin ▾ → Seed Fixtures to load demo data."
+                : "No memories linked to this entity in the FalkorDB graph."}
+            </div>
           )}
           {!timelineLoading && timeline.map((m) => (
             <div key={m.id} className={`task-card ${m.status}`}>

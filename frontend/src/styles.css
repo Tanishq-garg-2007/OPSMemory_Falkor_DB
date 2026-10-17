@@ -890,7 +890,29 @@ strong { font-weight: 700; }
 
 /* ---------- Timeline view ---------- */
 .timeline-controls {
+  display: flex;
   align-items: center;
+  gap: 0.6rem;
+  padding: 0.8rem 1rem 0;
+  flex-wrap: nowrap;
+}
+.timeline-select {
+  min-width: 180px;
+  flex: 1;
+  max-width: 320px;
+  height: 36px;
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  padding: 0.35rem 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.timeline-select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .timeline-summary {
   font-family: var(--font-sans);
