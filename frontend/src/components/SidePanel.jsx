@@ -108,16 +108,44 @@ export default function SidePanel({
   return (
     <section className="panel tasks-graph-panel">
       <div className="panel-header tabs-header">
-        <button className={`tab-btn ${tab === "tasks" ? "active" : ""}`} onClick={() => onTab("tasks")}>Task Board</button>
-        <button className={`tab-btn ${tab === "agents" ? "active" : ""}`} onClick={() => onTab("agents")}>Agents</button>
-        <button className={`tab-btn ${tab === "timeline" ? "active" : ""}`} onClick={() => onTab("timeline")}>Timeline</button>
-        <button className={`tab-btn ${tab === "graph" ? "active" : ""}`} onClick={() => onTab("graph")}>Memory Inspector</button>
+        <button
+          className={`tab-btn ${tab === "tasks" ? "active" : ""}`}
+          onClick={() => onTab("tasks")}
+          data-tooltip="Task Board: Tasks dispatched to workers with atomic Cypher mutual-exclusion leases."
+          data-tooltip-pos="bottom"
+        >
+          Task Board
+        </button>
+        <button
+          className={`tab-btn ${tab === "agents" ? "active" : ""}`}
+          onClick={() => onTab("agents")}
+          data-tooltip="Agent Relay: Real-time multi-agent handoffs (Triage &rarr; Resolver &rarr; Curator) with reasons and task IDs."
+          data-tooltip-pos="bottom"
+        >
+          Agents
+        </button>
+        <button
+          className={`tab-btn ${tab === "timeline" ? "active" : ""}`}
+          onClick={() => onTab("timeline")}
+          data-tooltip="Entity Timeline: Chronological audit trail showing memory validity, version bumps, and supersessions."
+          data-tooltip-pos="bottom"
+        >
+          Timeline
+        </button>
+        <button
+          className={`tab-btn ${tab === "graph" ? "active" : ""}`}
+          onClick={() => onTab("graph")}
+          data-tooltip="Memory Inspector: Raw JSON dump of all nodes, edges, and validity ranges in FalkorDB."
+          data-tooltip-pos="bottom"
+        >
+          Memory Inspector
+        </button>
       </div>
 
       {/* Task Board Tab */}
       <div className={`tab-content ${tab === "tasks" ? "active" : ""}`}>
         <div className="task-controls">
-          <button className="btn btn-secondary btn-sm" onClick={onRefreshTasks}>Refresh Tasks</button>
+          <button className="btn btn-secondary btn-sm" onClick={onRefreshTasks} data-tooltip="Refresh Tasks: Re-queries FalkorDB to sync active task leases." data-tooltip-pos="bottom">Refresh Tasks</button>
         </div>
         <div className="tasks-list">
           {tasksError && <div className="empty-state">Error loading tasks: {tasksError}</div>}
@@ -189,7 +217,7 @@ export default function SidePanel({
           </select>
         </div>
         <div className="tasks-list">
-          {timelineLoading && <div className="page-note">Loading timeline…</div>}
+          {timelineLoading && <div className="page-note">Loading…</div>}
           {!timelineLoading && timeline.length === 0 && (
             <div className="page-note">No memories about this entity yet.</div>
           )}
@@ -207,7 +235,7 @@ export default function SidePanel({
               </div>
               {m.superseded_by && (
                 <div className="timeline-arrow">
-                  ↳ Replaced by: <code>{m.superseded_by}</code>
+↳ Superseded by: <code>{m.superseded_by}</code>
                 </div>
               )}
             </div>
@@ -218,8 +246,8 @@ export default function SidePanel({
       {/* Memory Inspector Tab */}
       <div className={`tab-content ${tab === "graph" ? "active" : ""}`}>
         <div className="inspector-controls">
-          <button className="btn btn-secondary btn-sm" onClick={onLoadMemories}>Load All Memories</button>
-          <button className="btn btn-primary btn-sm" onClick={onOpenGraph}>Open Graph View</button>
+          <button className="btn btn-secondary btn-sm" onClick={onLoadMemories} data-tooltip="Load All Memories: Fetches complete inventory of episodic, semantic, and procedural graph nodes." data-tooltip-pos="top">Load All Memories</button>
+          <button className="btn btn-primary btn-sm" onClick={onOpenGraph} data-tooltip="Launch Graph View: Expands full-screen interactive 2D FalkorDB graph visualizer." data-tooltip-pos="top">Open Graph View</button>
         </div>
         <pre className="memory-inspector">{inspector}</pre>
       </div>

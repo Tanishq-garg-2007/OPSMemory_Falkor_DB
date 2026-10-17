@@ -191,17 +191,22 @@ export default function GraphView({ tenantKey, focusId = null, onClose }) {
             <h2>Memory Graph</h2>
             {data && (
               <span className="badge">
-                {data.nodes.length} nodes · {data.links.length} links{data.truncated ? " · truncated" : ""}
+                {data.nodes.length} nodes • {data.links.length} links{data.truncated ? " • truncated" : ""}
               </span>
             )}
           </div>
           <div className="graph-actions">
             {data && data.nodes.length > 0 && (
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowJson((v) => !v)}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowJson((v) => !v)}
+                data-tooltip="Toggle View: Switch between interactive 2D Force-Directed Graph and raw JSON topology payload."
+                data-tooltip-pos="bottom"
+              >
                 {showJson ? "Show graph" : "Show JSON"}
               </button>
             )}
-            <button className="btn btn-secondary btn-sm" onClick={onClose}>Close</button>
+            <button className="btn btn-secondary btn-sm" onClick={onClose} data-tooltip="Close Graph: Return to the conversation and evidence dashboard." data-tooltip-pos="bottom">Close</button>
           </div>
         </div>
 
@@ -219,6 +224,8 @@ export default function GraphView({ tenantKey, focusId = null, onClose }) {
                       className={`legend-item ${off ? "off" : ""}`}
                       aria-pressed={!off}
                       onClick={() => toggleType(t)}
+                      data-tooltip={`Toggle visibility of ${t} nodes in the graph.`}
+                      data-tooltip-pos="top"
                     >
                       <span className={`legend-dot node-${t}`} />
                       {t}

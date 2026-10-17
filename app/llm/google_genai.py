@@ -10,8 +10,9 @@ logger = get_logger("google_genai")
 
 
 class GoogleGenAIClient(BaseLLMClient):
-    """Client for Google GenAI API targeting Gemma 4 31B (gemma-4-31b-it) with automatic Ollama/Mock fallback."""
-    def __init__(self, settings: Optional[Settings] = None):
+    """Client for Google GenAI API targeting Gemma 4 31B (gemma-4-31b-it) with automatic Groq/Mock fallback."""
+    def __init__(self, settings: Optional[Settings] = None, allow_fallback: bool = True):
+        self.allow_fallback = allow_fallback
         self.settings = settings or get_settings()
         self.api_key = self.settings.effective_google_api_key
         self.model_id = self.settings.LLM_MODEL_ID
@@ -28,27 +29,37 @@ class GoogleGenAIClient(BaseLLMClient):
             logger.warning(f"Could not initialize google.genai client: {e}")
 
     async def _execute_text_fallback(self, prompt: str, system_prompt: Optional[str] = None, reason: str = "") -> str:
-        logger.warning(f"Google GenAI unavailable ({reason}). Falling back to local Ollama...")
+        if not self.allow_fallback:
+            logger.warning(f"Google GenAI unavailable ({reason}). Fallback disabled; using Mock.")
+            from app.llm.mock import MockLLMClient
+            return await MockLLMClient().generate_text(prompt, system_prompt)
+
+        logger.warning(f"Google GenAI unavailable ({reason}). Falling back to Groq...")
         try:
-            from app.llm.ollama import OllamaClient
-            ollama = OllamaClient(self.settings)
-            return await asyncio.wait_for(ollama.generate_text(prompt, system_prompt), timeout=45.0)
+            from app.llm.groq import GroqClient
+            groq_c = GroqClient(self.settings, allow_fallback=False)
+            return await asyncio.wait_for(groq_c.generate_text(prompt, system_prompt), timeout=30.0)
         except Exception as e:
             err_msg = str(e) or type(e).__name__
-            logger.warning(f"Local Ollama fallback failed ({err_msg}). Falling back to MockLLMClient.")
+            logger.warning(f"Groq fallback failed ({err_msg}). Falling back to MockLLMClient.")
             from app.llm.mock import MockLLMClient
             mock = MockLLMClient()
             return await mock.generate_text(prompt, system_prompt)
 
     async def _execute_json_fallback(self, prompt: str, system_prompt: Optional[str] = None, reason: str = "") -> Dict[str, Any]:
-        logger.warning(f"Google GenAI JSON generation unavailable ({reason}). Falling back to local Ollama...")
+        if not self.allow_fallback:
+            logger.warning(f"Google GenAI JSON unavailable ({reason}). Fallback disabled; using Mock.")
+            from app.llm.mock import MockLLMClient
+            return await MockLLMClient().generate_json(prompt, system_prompt)
+
+        logger.warning(f"Google GenAI JSON generation unavailable ({reason}). Falling back to Groq...")
         try:
-            from app.llm.ollama import OllamaClient
-            ollama = OllamaClient(self.settings)
-            return await asyncio.wait_for(ollama.generate_json(prompt, system_prompt), timeout=45.0)
+            from app.llm.groq import GroqClient
+            groq_c = GroqClient(self.settings, allow_fallback=False)
+            return await asyncio.wait_for(groq_c.generate_json(prompt, system_prompt), timeout=30.0)
         except Exception as e:
             err_msg = str(e) or type(e).__name__
-            logger.warning(f"Local Ollama JSON fallback failed ({err_msg}). Falling back to MockLLMClient.")
+            logger.warning(f"Groq JSON fallback failed ({err_msg}). Falling back to MockLLMClient.")
             from app.llm.mock import MockLLMClient
             mock = MockLLMClient()
             return await mock.generate_json(prompt, system_prompt)

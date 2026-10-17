@@ -90,7 +90,7 @@ def has_incident_signal(text: str) -> bool:
     return bool(_INCIDENT_RE.search(text.lower()))
 
 
-_INCIDENT_ID_RE = re.compile(r"\binc[-_]?([a-z0-9]+(?:-[a-z0-9]+)*)\b")
+_INCIDENT_ID_RE = re.compile(r"\b(?:incident\s+|inc[-_]?)([a-z0-9]+(?:-[a-z0-9]+)*)\b", re.IGNORECASE)
 _DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
@@ -101,7 +101,15 @@ def reference_tokens(text: str) -> set:
     for any value, instead of a hardcoded list of fixture strings.
     """
     t = _DATE_RE.sub(" ", text.lower())
-    tokens = {f"inc-{m.group(1)}" for m in _INCIDENT_ID_RE.finditer(t) if any(c.isdigit() for c in m.group(1)) or "-" in m.group(1)}
+    tokens = set()
+    for m in _INCIDENT_ID_RE.finditer(t):
+        val = m.group(1)
+        if val == "ident":
+            continue
+        if val.startswith("inc-") or val.startswith("inc_"):
+            val = val[4:]
+        if any(c.isdigit() for c in val) or "-" in val:
+            tokens.add(f"inc-{val}")
     without_inc = _INCIDENT_ID_RE.sub(" ", t)
     tokens |= {_normalize_version(v) for v in _VERSION_RE.findall(without_inc)}
     return tokens

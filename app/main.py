@@ -1,6 +1,6 @@
 """FastAPI application factory and route registration."""
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.config import get_settings
 from app.errors import OpsMemoryError
@@ -55,6 +55,24 @@ def create_app() -> FastAPI:
     static_dir = os.path.join(os.path.dirname(__file__), "ui", "static")
     if os.path.exists(static_dir):
         app.mount("/ui", StaticFiles(directory=static_dir, html=True), name="ui")
+
+    
+    # Serve root favicon and icons directly for browsers querying root domain
+    @app.get("/favicon.ico", include_in_schema=False)
+    @app.get("/favicon.png", include_in_schema=False)
+    @app.get("/favicon-16x16.png", include_in_schema=False)
+    @app.get("/favicon-32x32.png", include_in_schema=False)
+    @app.get("/favicon-48x48.png", include_in_schema=False)
+    @app.get("/favicon-96x96.png", include_in_schema=False)
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    @app.get("/site.webmanifest", include_in_schema=False)
+    async def serve_root_icons(request: Request):
+        icon_name = request.url.path.lstrip("/")
+        icon_path = os.path.join(os.path.dirname(__file__), "ui", "static", icon_name)
+        if os.path.exists(icon_path):
+            media_type = "image/x-icon" if icon_name.endswith(".ico") else "image/png" if icon_name.endswith(".png") else "application/manifest+json"
+            return FileResponse(icon_path, media_type=media_type)
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
 
     @app.get("/", include_in_schema=False)
     async def root_redirect():

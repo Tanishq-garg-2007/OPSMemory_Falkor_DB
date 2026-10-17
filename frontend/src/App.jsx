@@ -6,6 +6,7 @@ import EvidencePanel from "./components/EvidencePanel.jsx";
 import SidePanel from "./components/SidePanel.jsx";
 import GraphView from "./components/GraphView.jsx";
 import Guide from "./components/Guide.jsx";
+import GlobalTooltip from "./components/GlobalTooltip.jsx";
 import { TENANTS, getHealth, sendChat, getTasks, getMemories, seedTenant, resetTenant, getConversationTurns } from "./api.js";
 import { useTheme } from "./hooks.js";
 
@@ -76,7 +77,7 @@ export default function App() {
     try {
       const turns = await getConversationTurns(key, convId);
       if (!turns || turns.length === 0) {
-        // Session exists in localStorage but has no turns — clear it
+        // Session exists in localStorage but has no turns - clear it
         persistConvId(tenantId, null);
         return;
       }
@@ -89,7 +90,7 @@ export default function App() {
       setMessages(msgs);
       setConversationId(convId);
     } catch {
-      // Conversation no longer exists server-side — clear the stale key
+      // Conversation no longer exists server-side - clear the stale key
       persistConvId(tenantId, null);
     }
   }, [persistConvId]);
@@ -213,6 +214,7 @@ export default function App() {
           onOpenBoard={() => setBoardOpen(true)}
           onOpenGraph={handleOpenGraph}
           onOpenGuide={() => setGuideOpen(true)}
+          onNewChat={handleNewConversation}
         />
         <Hero compact={messages.length > 0} />
         <div className="torn" aria-hidden="true" />
@@ -239,7 +241,7 @@ export default function App() {
           <aside className="board-drawer" role="dialog" aria-label="Task board and memory inspector">
             <div className="drawer-head">
               <strong>Board</strong>
-              <button className="btn btn-secondary btn-sm" onClick={() => setBoardOpen(false)}>Close</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setBoardOpen(false)} data-tooltip="Close Drawer: Return to main conversation dashboard." data-tooltip-pos="left">Close</button>
             </div>
             <div className="drawer-body">
               <SidePanel
@@ -262,6 +264,8 @@ export default function App() {
       {guideOpen && (
         <Guide onClose={() => setGuideOpen(false)} />
       )}
+
+      <GlobalTooltip />
     </>
   );
 }

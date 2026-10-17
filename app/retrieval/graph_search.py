@@ -42,8 +42,12 @@ class GraphSearcher:
                 proximity_score += 0.5 * len(matches)
 
             # Check incident ID match
-            if intent.incident_id and intent.incident_id in (mem.title.lower() + " " + mem.summary.lower()):
-                proximity_score += 1.0
+            if intent.incident_id:
+                inc_lower = intent.incident_id.lower()
+                raw_num = inc_lower.replace("inc-", "").replace("inc_", "")
+                mem_text = (mem.title.lower() + " " + mem.summary.lower())
+                if inc_lower in mem_text or f"incident {raw_num}" in mem_text or (len(raw_num) >= 3 and f" {raw_num} " in f" {mem_text} "):
+                    proximity_score += 1.0
 
             if proximity_score > 0 and mem.id not in seen_ids:
                 seen_ids.add(mem.id)

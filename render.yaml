@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: opsmemory
+    runtime: python
+    buildCommand: pip install .
+    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_PRIMARY_MODEL
+        value: qwen/qwen3.8-27b
+      - key: GROQ_FALLBACK_MODEL
+        value: openai/gpt-oss-20b
+      - key: REAL_LLM
+        value: "1"
+      - key: ADMIN_API_KEY
+        value: test_admin_secret
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: FALKORDB_HOST
+        sync: false
+      - key: FALKORDB_PORT
+        sync: false
+      - key: FALKORDB_PASSWORD
+        sync: false

@@ -2,19 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import { TENANTS } from "../api.js";
 
 export default function Header({
-  tenantKey, onTenant, onSeed, onReset, health, theme, onToggleTheme, taskCount, onOpenBoard, onOpenGraph, onOpenGuide,
+  tenantKey, onTenant, onSeed, onReset, health, theme, onToggleTheme, taskCount, onOpenBoard, onOpenGraph, onOpenGuide, onNewChat,
 }) {
   const [adminOpen, setAdminOpen] = useState(false);
   const adminRef = useRef(null);
 
-  // Close the Admin menu when the user clicks anywhere outside it
+  // Close the Admin menu when the user clicks anywhere outside it or presses Escape
   useEffect(() => {
     if (!adminOpen) return;
     const onDown = (e) => {
-      if (adminRef.current && !adminRef.current.contains(e.target)) setAdminOpen(false);
+      if (e.key === "Escape") {
+        setAdminOpen(false);
+      } else if (adminRef.current && !adminRef.current.contains(e.target)) {
+        setAdminOpen(false);
+      }
     };
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onDown);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onDown);
+    };
   }, [adminOpen]);
 
   const runAdmin = (action) => {
@@ -25,59 +33,105 @@ export default function Header({
   return (
     <header className="app-header">
       <div className="header-left">
-        <div className="logo-badge">⚡ OpsMemory</div>
+        <div className="logo-badge">
+          <img src="/ui/favicon-96x96.png" alt="" className="logo-icon" />
+          <span>OpsMemory</span>
+        </div>
         <span className="version-tag">v0.1.0</span>
       </div>
       <div className="header-right">
         <label htmlFor="tenant-select" className="tenant-label">Tenant:</label>
-        <select id="tenant-select" className="tenant-select" value={tenantKey} onChange={(e) => onTenant(e.target.value)}>
-          {TENANTS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
+        <div
+          className="tooltip-wrap"
+          data-tooltip="Tenant Isolation: Switch between isolated tenant graphs (Acme Corp vs Beta Labs). Memories and incidents never leak across tenants."
+          data-tooltip-pos="bottom"
+        >
+          <select id="tenant-select" className="tenant-select" value={tenantKey} onChange={(e) => onTenant(e.target.value)}>
+            {TENANTS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
+        </div>
 
-        <button className="btn btn-primary" onClick={onOpenGraph}>Memory Graph</button>
+        <button
+          id="header-new-chat-btn"
+          className="btn btn-primary header-new-chat-btn"
+          onClick={onNewChat}
+          data-tooltip="Start New Chat Session: Clears current transcript to test Cross-Chat Persistent Memory. Memories learned in prior chats remain available in FalkorDB!"
+          data-tooltip-pos="bottom"
+        >
+          + New Chat
+        </button>
 
-        <button className="btn btn-secondary" onClick={onOpenBoard}>
+        <button
+          className="btn btn-secondary"
+          onClick={onOpenGraph}
+          data-tooltip="Interactive FalkorDB Graph: Visualizes service dependencies, incident nodes, and episodic/semantic/procedural memory relationships in real time."
+          data-tooltip-pos="bottom"
+        >
+          Memory Graph
+        </button>
+
+        <button
+          className="btn btn-secondary"
+          onClick={onOpenBoard}
+          data-tooltip="Task Board & Multi-Agent Handoffs: View active tasks claimed via Cypher leases, live triage-to-resolver-to-curator handoffs, and memory inspection."
+          data-tooltip-pos="bottom"
+        >
           Board <span className="count">{taskCount}</span>
         </button>
 
-        <button className="btn btn-secondary" onClick={onOpenGuide}>
+        <button
+          className="btn btn-secondary"
+          onClick={onOpenGuide}
+          data-tooltip="Interactive Documentation: Complete walkthrough of Track 2 architecture, agent coordination relay, and evaluation guide."
+          data-tooltip-pos="bottom"
+        >
           Guide
         </button>
 
         <div className="admin-menu" ref={adminRef}>
           <button
-            className="btn btn-secondary"
+            id="admin-menu-btn"
+            className={`btn btn-secondary ${adminOpen ? "active" : ""}`}
             aria-haspopup="menu"
             aria-expanded={adminOpen}
             onClick={() => setAdminOpen((v) => !v)}
+            data-tooltip={adminOpen ? undefined : "Admin Controls: Seed deterministic incident fixtures or wipe tenant data. Requires ADMIN_API_KEY for privilege separation."}
+            data-tooltip-pos="bottom"
           >
-            Admin ▾
+            Admin &#9662;
           </button>
           {adminOpen && (
             <div className="admin-dropdown" role="menu">
-              <button role="menuitem" onClick={() => runAdmin(onSeed)}>Seed Fixtures</button>
-              <button role="menuitem" className="danger" onClick={() => runAdmin(onReset)}>Reset Data</button>
+              <button
+                className="admin-item"
+                role="menuitem"
+                onClick={() => runAdmin(onSeed)}
+                data-tooltip="Seed Demo Fixtures: Loads standardized incidents (inc-101), dependencies, and runbooks into FalkorDB."
+                data-tooltip-pos="left"
+              >
+                Seed Fixtures
+              </button>
+              <button
+                className="admin-item danger"
+                role="menuitem"
+                onClick={() => runAdmin(onReset)}
+                data-tooltip="Purge Tenant Data: Completely clears all graph memories, tasks, and conversations for this tenant."
+                data-tooltip-pos="left"
+              >
+                Reset Data
+              </button>
             </div>
           )}
         </div>
 
-        <div className={`status-indicator ${health.ok ? "connected" : ""}`}>
-          <span className="status-dot" />
-          <span>{health.text}</span>
-        </div>
-
         <button
-          className="theme-toggle"
-          type="button"
+          className="btn btn-secondary theme-toggle"
           onClick={onToggleTheme}
-          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          title="Toggle light/dark mode"
+          aria-label="Toggle light or dark theme"
+          data-tooltip="Theme Switcher: Toggle between tactile parchment light mode and dark espresso journal mode."
+          data-tooltip-pos="bottom"
         >
-          {theme === "dark" ? (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
-          ) : (
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
-          )}
+          {theme === "dark" ? "\u2600" : "\u263e"}
         </button>
       </div>
     </header>

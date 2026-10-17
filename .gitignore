@@ -24,3 +24,8 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Media files exceeding GitHub 100MB limit
+*.mp4
+*.mov
+*.avi

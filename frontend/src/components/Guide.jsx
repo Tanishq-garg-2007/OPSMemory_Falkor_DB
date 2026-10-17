@@ -25,10 +25,13 @@ export default function Guide({ onClose }) {
       <div className="guide-modal" role="dialog" aria-modal="true" aria-label="OpsMemory Frontend Guide">
         <div className="guide-head">
           <div className="guide-head-left">
-            <span className="logo-badge">⚡ OpsMemory</span>
+            <span className="logo-badge">
+              <img src={resolveImg("../favicon-96x96.png")} alt="" className="logo-icon" />
+              <span>OpsMemory</span>
+            </span>
             <span className="badge">Guide</span>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close Guide">
+          <button className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Close Guide" data-tooltip="Close Walkthrough: Return to the active OpsMemory console." data-tooltip-pos="left">
             Close
           </button>
         </div>
@@ -40,9 +43,9 @@ export default function Guide({ onClose }) {
             <p className="guide-subtitle"> Topic: Agent Memory and Coordination</p>
             <div className="guide-team-banner">
               <span>Tanishq Garg</span>
-              <span className="guide-dot">·</span>
+              <span className="guide-dot">•</span>
               <span>Gautam Jain</span>
-              <span className="guide-dot">·</span>
+              <span className="guide-dot">•</span>
               <span>Disha Gupta</span>
             </div>
           </header>
@@ -68,7 +71,7 @@ export default function Guide({ onClose }) {
                 <strong>Open the app in the browser.</strong> You will see the main workspace with the chat on the left and evidence on the right.
               </li>
               <li>
-                <strong>Open Admin and choose Seed Fixtures.</strong> The page prompts for the admin key (Ask the team for the admin key.). This loads sample services, incidents, and runbooks.
+                <strong>Open Admin and choose Seed Fixtures.</strong> The page prompts for the admin key (Default key: <code>test_admin_secret</code>, defined in <code>.env</code>). This loads sample services, incidents, and runbooks.
               </li>
               <li>
                 <strong>Ask &quot;What happened in inc-101?&quot;</strong> Type this into the chat box at the bottom and press Send to see a grounded response with citations.
@@ -82,7 +85,7 @@ export default function Guide({ onClose }) {
                 className="guide-screenshot"
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
               />
-              <figcaption className="guide-caption">![OpsMemory start screen](images/01-start-page.png)</figcaption>
+              <figcaption className="guide-caption">OpsMemory start screen overview</figcaption>
             </figure>
           </section>
 
@@ -150,7 +153,7 @@ export default function Guide({ onClose }) {
               <h3>a. The header</h3>
               <p><strong>What it is:</strong> The persistent top navigation bar visible across all screens.</p>
               <p>
-                <strong>What you see:</strong> The OpsMemory lightning logo, version tag (v0.1.0), Tenant selector,
+                <strong>What you see:</strong> The OpsMemory logo, version tag (v0.1.0), Tenant selector,
                 Memory Graph button, Board button with open task count badge, Admin menu dropdown,
                 connection status badge, light and dark theme toggle, and the Guide button.
               </p>
@@ -204,7 +207,7 @@ export default function Guide({ onClose }) {
                   className="guide-screenshot"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
-                <figcaption className="guide-caption">![Chat answer with citations and reasoning paths](images/02-chat-answer.png)</figcaption>
+                <figcaption className="guide-caption">Grounded answer with citations and reasoning paths</figcaption>
               </figure>
             </div>
 
@@ -232,7 +235,7 @@ export default function Guide({ onClose }) {
                   className="guide-screenshot"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
-                <figcaption className="guide-caption">![Retrieved evidence cards](images/03-evidence-cards.png)</figcaption>
+                <figcaption className="guide-caption">Retrieved evidence cards with match score and validity</figcaption>
               </figure>
             </div>
 
@@ -257,7 +260,7 @@ export default function Guide({ onClose }) {
                   className="guide-screenshot"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
-                <figcaption className="guide-caption">![Show in graph action](images/04-show-in-graph.png)</figcaption>
+                <figcaption className="guide-caption">Focusing memory node in the interactive graph</figcaption>
               </figure>
             </div>
 
@@ -281,7 +284,7 @@ export default function Guide({ onClose }) {
                 <li>
                   <strong>Timeline:</strong> Features an Entity dropdown menu (such as payments-api) populated from graph entities.
                   Renders memories in date order on alternating book pages. Outdated entries are struck through with arrows pointing directly
-                  to their replacement (↳ Replaced by). Shows &quot;No memories about this entity yet.&quot; when empty.
+                  to their replacement (↳ Superseded by). Shows &quot;No memories about this entity yet.&quot; when empty.
                 </li>
                 <li>
                   <strong>Memory Inspector:</strong> Provides a raw structured view of tenant records with &quot;Load All Memories&quot; and &quot;Open Graph View&quot; buttons.
@@ -301,7 +304,7 @@ export default function Guide({ onClose }) {
                   className="guide-screenshot"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
-                <figcaption className="guide-caption">![Agents coordination relay in Board drawer](images/05-board-agents.png)</figcaption>
+                <figcaption className="guide-caption">Multi-agent coordination relay (Triage → Resolver → Curator)</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">The Timeline tab illustrates superseded facts pointing forward to current production versions.</p>
@@ -311,7 +314,7 @@ export default function Guide({ onClose }) {
                   className="guide-screenshot"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
-                <figcaption className="guide-caption">![Entity memory timeline in Board drawer](images/06-board-timeline.png)</figcaption>
+                <figcaption className="guide-caption">Entity memory timeline showing historical supersession</figcaption>
               </figure>
             </div>
 
@@ -392,24 +395,32 @@ export default function Guide({ onClose }) {
                   className="guide-screenshot"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
-                <figcaption className="guide-caption">![Interactive Memory Graph](images/07-memory-graph.png)</figcaption>
+                <figcaption className="guide-caption">Interactive Memory Graph topology visualization</figcaption>
               </figure>
             </div>
 
             {/* 5h. Admin menu */}
             <div className="guide-feature-block">
-              <h3>h. Admin menu</h3>
-              <p><strong>What it is:</strong> A dropdown providing administrative fixture management.</p>
+              <h3>h. Admin menu &amp; Privilege Separation</h3>
+              <p><strong>What it is:</strong> A dedicated administrative control panel providing secure fixture management and tenant data isolation.</p>
               <p>
-                <strong>What you see:</strong> An &quot;Admin ▾&quot; button revealing &quot;Seed Fixtures&quot; and &quot;Reset Data&quot; (highlighted in red danger styling).
+                <strong>Why Privilege Separation Matters:</strong> Standard operators interact via <code>X-Tenant-Key</code> (e.g. <code>key_acme_secret</code>) which strictly scopes their access to incident chat and retrieval. Regular users cannot wipe databases or re-seed graph topologies. Destructive operations require the dedicated <code>X-Admin-Key</code>, protected by constant-time cryptographic verification (<code>hmac.compare_digest</code>).
               </p>
               <p>
-                <strong>What you can do:</strong> Click &quot;Seed Fixtures&quot; to populate standard incidents, runbooks, and service facts for the selected tenant.
-                Click &quot;Reset Data&quot; to clear all knowledge records after confirming. When triggered, the browser requests the admin key
-                (Ask the team for the admin key.). The key is stored only in the browser tab session memory and disappears as soon as the tab closes.
+                <strong>What you see:</strong> An &quot;Admin &#9662;&quot; button revealing &quot;Seed Fixtures&quot; and &quot;Reset Data&quot; (highlighted in red danger styling).
+              </p>
+              <p>
+                <strong>What you can do &amp; Endpoint Roles:</strong>
+              </p>
+              <ul className="guide-list" style={{ marginTop: "0.5rem", marginBottom: "0.5rem" }}>
+                <li><strong>Seed Fixtures (<code>POST /v1/admin/seed</code>):</strong> Instantly populates realistic incident postmortems, dependency graphs, runbooks, and preferences into FalkorDB for evaluation and demonstrations.</li>
+                <li><strong>Reset Data (<code>POST /v1/admin/reset</code>):</strong> Completely purges all stored knowledge, tasks, and dialogue turns for the tenant back to a clean slate.</li>
+              </ul>
+              <p>
+                When triggered, the browser requests the admin key (Default key: <code>test_admin_secret</code>, defined in <code>.env</code>). The key is stored temporarily in <code>sessionStorage</code> and disappears as soon as the browser tab closes.
               </p>
               <p className="guide-why">
-                <em>Why it matters:</em> Allows evaluators to populate realistic test scenarios or reset to a clean slate in seconds.
+                <em>Why it matters:</em> Guarantees high-privilege operations remain isolated from everyday chat users while allowing hackathon judges to reset and re-seed the environment in seconds.
               </p>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">The Admin dropdown provides fast fixture population and data reset capabilities.</p>
@@ -419,7 +430,7 @@ export default function Guide({ onClose }) {
                   className="guide-screenshot"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
-                <figcaption className="guide-caption">![Admin menu with seed and reset options](images/08-admin-menu.png)</figcaption>
+                <figcaption className="guide-caption">Admin menu with seed and reset options</figcaption>
               </figure>
             </div>
 
@@ -445,7 +456,7 @@ export default function Guide({ onClose }) {
                   className="guide-screenshot"
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
-                <figcaption className="guide-caption">![OpsMemory in dark theme](images/09-dark-theme.png)</figcaption>
+                <figcaption className="guide-caption">OpsMemory in warm dark theme</figcaption>
               </figure>
             </div>
 
@@ -476,7 +487,7 @@ export default function Guide({ onClose }) {
 
             <div className="guide-walkthrough-step">
               <h4>1. Seed the Acme Corp tenant</h4>
-              <p>Select &quot;Acme Corp (acme)&quot; in the Tenant dropdown. Click Admin &rarr; Seed Fixtures. When prompted for the key, enter the admin key (Ask the team for the admin key.).</p>
+              <p>Select &quot;Acme Corp (acme)&quot; in the Tenant dropdown. Click Admin &rarr; Seed Fixtures. When prompted for the key, enter the admin key (Default key: <code>test_admin_secret</code>, defined in <code>.env</code>).</p>
               <p className="guide-expected"><strong>What you should see:</strong> An alert confirming memories, entities, and tasks were seeded successfully.</p>
             </div>
 
@@ -722,47 +733,47 @@ export default function Guide({ onClose }) {
               <figure className="guide-figure">
                 <p className="guide-figure-desc">01. Start screen</p>
                 <img src={resolveImg("01-start-page.png")} alt="OpsMemory start screen" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![OpsMemory start screen](images/01-start-page.png)</figcaption>
+                <figcaption className="guide-caption">OpsMemory start screen overview</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">02. Chat answer with citations and reasoning paths</p>
                 <img src={resolveImg("02-chat-answer.png")} alt="Chat answer with citations and reasoning paths" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![Chat answer with citations and reasoning paths](images/02-chat-answer.png)</figcaption>
+                <figcaption className="guide-caption">Grounded answer with citations and reasoning paths</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">03. Retrieved evidence cards</p>
                 <img src={resolveImg("03-evidence-cards.png")} alt="Retrieved evidence cards" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![Retrieved evidence cards](images/03-evidence-cards.png)</figcaption>
+                <figcaption className="guide-caption">Retrieved evidence cards with match score and validity</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">04. Show in graph action</p>
                 <img src={resolveImg("04-show-in-graph.png")} alt="Show in graph action" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![Show in graph action](images/04-show-in-graph.png)</figcaption>
+                <figcaption className="guide-caption">Focusing memory node in the interactive graph</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">05. Agents coordination relay in Board drawer</p>
                 <img src={resolveImg("05-board-agents.png")} alt="Agents coordination relay in Board drawer" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![Agents coordination relay in Board drawer](images/05-board-agents.png)</figcaption>
+                <figcaption className="guide-caption">Multi-agent coordination relay (Triage → Resolver → Curator)</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">06. Entity memory timeline in Board drawer</p>
                 <img src={resolveImg("06-board-timeline.png")} alt="Entity memory timeline in Board drawer" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![Entity memory timeline in Board drawer](images/06-board-timeline.png)</figcaption>
+                <figcaption className="guide-caption">Entity memory timeline showing historical supersession</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">07. Interactive Memory Graph</p>
                 <img src={resolveImg("07-memory-graph.png")} alt="Interactive Memory Graph" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![Interactive Memory Graph](images/07-memory-graph.png)</figcaption>
+                <figcaption className="guide-caption">Interactive Memory Graph topology visualization</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">08. Admin menu with seed and reset options</p>
                 <img src={resolveImg("08-admin-menu.png")} alt="Admin menu with seed and reset options" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![Admin menu with seed and reset options](images/08-admin-menu.png)</figcaption>
+                <figcaption className="guide-caption">Admin menu with seed and reset options</figcaption>
               </figure>
               <figure className="guide-figure">
                 <p className="guide-figure-desc">09. OpsMemory in dark theme</p>
                 <img src={resolveImg("09-dark-theme.png")} alt="OpsMemory in dark theme" className="guide-screenshot" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                <figcaption className="guide-caption">![OpsMemory in dark theme](images/09-dark-theme.png)</figcaption>
+                <figcaption className="guide-caption">OpsMemory in warm dark theme</figcaption>
               </figure>
             </div>
           </section>
@@ -770,14 +781,14 @@ export default function Guide({ onClose }) {
           {/* 12. Team */}
           <section className="guide-section guide-team-section">
             <h2>Team</h2>
-            <p>Built with care for the MEM_AGENTS Hackathon by:</p>
+            <p>Built with care for the WeMakeDevs FalkorDB Hackathon (Track 2: Agent Memory and Coordination) by:</p>
             <div className="guide-team-list">
               <p><strong>Tanishq Garg</strong></p>
               <p><strong>Gautam Jain</strong></p>
               <p><strong>Disha Gupta</strong></p>
             </div>
             <div className="guide-footer-action">
-              <button className="btn btn-primary" onClick={onClose}>
+              <button className="btn btn-primary" onClick={onClose} data-tooltip="Return to the active OpsMemory console and test the system." data-tooltip-pos="top">
                 Back to OpsMemory
               </button>
             </div>

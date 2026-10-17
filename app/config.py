@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # LLM Settings
     LLM_PROVIDER: str = "google_genai"
     LLM_MODEL_ID: str = "gemma-4-31b-it"
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_PRIMARY_MODEL: str = "qwen/qwen3.8-27b"
+    GROQ_FALLBACK_MODEL: str = "openai/gpt-oss-20b"
     GOOGLE_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
     LLM_TIMEOUT_SECONDS: int = 60
@@ -48,6 +51,10 @@ class Settings(BaseSettings):
     ENABLE_EMBEDDINGS: bool = True
     EVIDENCE_TOKEN_BUDGET: int = 1200
     RRF_K: int = 60
+
+    @property
+    def effective_groq_api_key(self) -> Optional[str]:
+        return self.GROQ_API_KEY or os.environ.get("GROQ_API_KEY")
 
     @property
     def effective_google_api_key(self) -> Optional[str]:

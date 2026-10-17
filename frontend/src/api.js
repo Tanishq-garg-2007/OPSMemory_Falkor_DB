@@ -20,7 +20,10 @@ async function request(path, { key, adminKey, method = "GET", body } = {}) {
 function getAdminKey() {
   let adminKey = sessionStorage.getItem(ADMIN_KEY_STORAGE);
   if (!adminKey) {
-    adminKey = window.prompt("Enter the admin key (ADMIN_API_KEY in your .env file):");
+    adminKey = window.prompt(
+      "Enter the admin key (ADMIN_API_KEY in .env, default: test_admin_secret):",
+      "test_admin_secret"
+    );
     if (!adminKey) throw new Error("No admin key entered");
     sessionStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
   }

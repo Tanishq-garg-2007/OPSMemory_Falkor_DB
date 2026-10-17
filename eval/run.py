@@ -11,8 +11,10 @@ from typing import List, Dict, Any
 from app.dependencies import TenantContext
 from app.memory.repository import get_memory_repository
 from app.agents.coordinator import get_coordinator
+from app.core.ids import conversation_id
 from eval.dataset.fixtures import seed_fixtures_for_tenant, reset_tenant_data
 from eval.dataset.holdout_fixtures import seed_holdout_fixtures, HOLDOUT_TENANT
+from eval.dataset.pipeline_fixtures import seed_pipeline_fixtures
 from eval.metrics import evaluate_case
 
 
@@ -24,6 +26,19 @@ def load_dataset(filepath: str, suite: str) -> List[Dict[str, Any]]:
                 continue
             case = json.loads(line)
             if suite == "all" or case.get("difficulty") == suite:
+                cases.append(case)
+    return cases
+
+
+def load_pipeline_dataset(filepath: str, stage: str = "all") -> List[Dict[str, Any]]:
+    """Load the pipeline dataset, optionally filtered by `stage` (extract/store/retrieve/edge)."""
+    cases = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            case = json.loads(line)
+            if stage == "all" or case.get("stage") == stage:
                 cases.append(case)
     return cases
 
@@ -201,15 +216,196 @@ async def run_benchmark(
     return 0 if failed == 0 else 1
 
 
+async def run_pipeline_benchmark(
+    stage: str = "all",
+    max_concurrency: int = 5,
+    output_dir: str = "reports",
+    real_llm: bool = False,
+):
+    """End-to-end pipeline benchmark.
+
+    Unlike run_benchmark, every case has its own isolated seeded tenant (delta_001 .. delta_NNN) and
+    may assert write-path behaviour (memories created / superseded / tasks) in addition to the answer.
+    Cases with a single tenant are executed sequentially in JSONL order so multi-turn conversations
+    work; distinct tenants run concurrently under the semaphore.
+    """
+    from app.config import get_settings
+    from app.llm import reset_llm_client
+
+    print(f"================================================================")
+    print(f"OpsMemory PIPELINE Benchmark: stage={stage.upper()} (REAL_LLM={1 if real_llm else 0})")
+    print(f"================================================================")
+
+    get_settings().REAL_LLM = 1 if real_llm else 0
+    reset_llm_client()
+
+    repo = get_memory_repository()
+    coordinator = get_coordinator()
+
+    dataset_path = os.path.join(os.path.dirname(__file__), "dataset", "pipeline_questions.jsonl")
+    cases = load_pipeline_dataset(dataset_path, stage)
+    print(f"Loaded {len(cases)} pipeline cases for stage '{stage}'.")
+
+    # Group by tenant so multi-turn cases share one conversation and one seeded graph.
+    tenants: Dict[str, List[Dict[str, Any]]] = {}
+    for c in cases:
+        tenants.setdefault(c["tenant_id"], []).append(c)
+
+    print(f"Seeding {len(tenants)} isolated pipeline tenants...")
+    for t in tenants:
+        ctx = TenantContext(tenant_id=t, graph_name=get_settings().tenant_graph_name(t))
+        repo.init_tenant_schema(t)
+        reset_tenant_data(ctx, repo)
+        seed_pipeline_fixtures(ctx, repo)
+
+    sem = asyncio.Semaphore(max_concurrency)
+
+    async def execute_case(case: Dict[str, Any]) -> Dict[str, Any]:
+        ctx = TenantContext(
+            tenant_id=case["tenant_id"],
+            graph_name=get_settings().tenant_graph_name(case["tenant_id"]),
+        )
+        raw_input = case["input"]
+        turns = raw_input if isinstance(raw_input, list) else [raw_input]
+        eval_turn = case.get("evaluate_turn", len(turns) - 1)
+        if eval_turn < 0:
+            eval_turn = len(turns) + eval_turn
+        conv_id = conversation_id()
+        start_t = time.perf_counter()
+        try:
+            async with sem:
+                evaluated = None
+                for i, msg in enumerate(turns):
+                    res = await coordinator.handle_user_message(ctx, msg, conv_id)
+                    if i == eval_turn:
+                        evaluated = res
+            elapsed = time.perf_counter() - start_t
+            res_dict = evaluated.model_dump()
+            eval_res = evaluate_case(case, res_dict)
+            eval_res["latency_sec"] = elapsed
+            eval_res["input"] = raw_input
+            eval_res["expected_behavior"] = case.get("expected_behavior", "answer")
+            return eval_res
+        except Exception as e:
+            elapsed = time.perf_counter() - start_t
+            return {
+                "case_id": case["id"],
+                "difficulty": case.get("stage", "unknown"),
+                "stage": case.get("stage"),
+                "passed": False,
+                "abstained": False,
+                "failure_reasons": [f"Execution error: {str(e)}"],
+                "latency_sec": elapsed,
+                "input": raw_input,
+                "expected_behavior": case.get("expected_behavior", "answer"),
+            }
+
+    async def execute_tenant(group: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out = []
+        for case in group:
+            out.append(await execute_case(case))
+        return out
+
+    start_all = time.perf_counter()
+    gathered = await asyncio.gather(*[execute_tenant(g) for g in tenants.values()])
+    total_walltime = time.perf_counter() - start_all
+    results: List[Dict[str, Any]] = [r for sub in gathered for r in sub]
+
+    total = len(results)
+    passed = sum(1 for r in results if r["passed"])
+    failed = total - passed
+    accuracy = (passed / total) * 100 if total > 0 else 0
+
+    latencies = sorted([r["latency_sec"] for r in results])
+    p50 = latencies[len(latencies) // 2] if latencies else 0
+    p95 = latencies[int(len(latencies) * 0.95)] if latencies else 0
+
+    by_stage: Dict[str, Dict[str, Any]] = {}
+    for st in sorted({r.get("stage") or "unknown" for r in results}):
+        group = [r for r in results if (r.get("stage") or "unknown") == st]
+        g_passed = sum(1 for r in group if r["passed"])
+        g_lat = sorted([r["latency_sec"] for r in group])
+        by_stage[st] = {
+            "total": len(group),
+            "passed": g_passed,
+            "accuracy": round((g_passed / len(group)) * 100, 1) if group else 0,
+            "p50_ms": round((g_lat[len(g_lat) // 2] if g_lat else 0) * 1000, 1),
+            "p95_ms": round((g_lat[int(len(g_lat) * 0.95)] if g_lat else 0) * 1000, 1),
+        }
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    os.makedirs(output_dir, exist_ok=True)
+    json_path = os.path.join(output_dir, f"pipeline_{timestamp}.json")
+    csv_path = os.path.join(output_dir, f"pipeline_{timestamp}.csv")
+
+    report_data = {
+        "timestamp": timestamp,
+        "stage": stage,
+        "dataset": "pipeline",
+        "real_llm": real_llm,
+        "summary": {
+            "total_cases": total,
+            "passed": passed,
+            "failed": failed,
+            "accuracy_pct": round(accuracy, 2),
+            "walltime_sec": round(total_walltime, 3),
+            "p50_latency_sec": round(p50, 4),
+            "p95_latency_sec": round(p95, 4),
+        },
+        "by_stage": by_stage,
+        "results": results,
+    }
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(report_data, f, indent=2)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["case_id", "stage", "passed", "latency_sec", "input", "failures"])
+        for r in results:
+            writer.writerow([
+                r["case_id"], r.get("stage", ""), r["passed"],
+                round(r["latency_sec"], 4), str(r.get("input", ""))[:60],
+                "; ".join(r.get("failure_reasons", []))
+            ])
+
+    print("\nPipeline Benchmark Complete:")
+    print(f"  Total Cases:  {total}")
+    print(f"  Passed:       {passed}")
+    print(f"  Failed:       {failed}")
+    print(f"  Accuracy:     {accuracy:.1f}%")
+    print(f"  p50 / p95:    {p50*1000:.1f}ms / {p95*1000:.1f}ms")
+    print("\nResults by Stage:")
+    for st, stats in by_stage.items():
+        print(f"  - {st.upper()}: {stats['passed']}/{stats['total']} ({stats['accuracy']}%)")
+    failures = [r for r in results if not r["passed"]]
+    if failures:
+        print("\nFailed Cases:")
+        for r in failures:
+            print(f"  - {r['case_id']}: {'; '.join(r.get('failure_reasons', []))}")
+    print(f"\nReports saved to {output_dir}/")
+    return 0 if failed == 0 else 1
+
+
 def main():
     parser = argparse.ArgumentParser(description="OpsMemory Benchmark Suite Runner")
     parser.add_argument("--suite", choices=["easy", "medium", "hard", "edge", "all"], default="all")
     parser.add_argument("--max-concurrency", type=int, default=5)
     parser.add_argument("--output-dir", default="reports")
     parser.add_argument("--real-llm", action="store_true")
-    parser.add_argument("--dataset", choices=["benchmark", "holdout"], default="benchmark",
-                        help="benchmark = 88 bundled questions (acme/beta); holdout = unseen tenant 'gamma'")
+    parser.add_argument("--dataset", choices=["benchmark", "holdout", "pipeline"], default="benchmark",
+                        help="benchmark = 88 bundled questions (acme/beta); holdout = unseen tenant 'gamma'; "
+                             "pipeline = 100 end-to-end cases across isolated delta tenants")
+    parser.add_argument("--stage", choices=["extract", "store", "retrieve", "edge", "all"], default="all",
+                        help="pipeline dataset stage filter (ignored for benchmark/holdout)")
     args = parser.parse_args()
+
+    if args.dataset == "pipeline":
+        code = asyncio.run(run_pipeline_benchmark(
+            stage=args.stage,
+            max_concurrency=args.max_concurrency,
+            output_dir=args.output_dir,
+            real_llm=args.real_llm,
+        ))
+        sys.exit(code)
 
     code = asyncio.run(run_benchmark(
         suite=args.suite,

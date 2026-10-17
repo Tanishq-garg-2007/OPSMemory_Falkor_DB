@@ -1,0 +1,11 @@
+case_id,stage,passed,latency_sec,input,failures
+edge_abstain_lunar,edge,True,0.0999,What is the launch code for the lunar mission?,
+edge_abstain_password,edge,True,0.1073,What is the admin password?,
+edge_abstain_degenerate,edge,True,0.0549,?,
+edge_abstain_spacecraft,edge,True,0.0997,Tell me about the spacecraft telemetry.,
+edge_isolation_other_tenant,edge,True,0.1247,What is the version of billing-gateway?,
+edge_no_supersede_new_entity,edge,True,0.1914,feature-flags version is v9.9,
+edge_duplicate_turn,edge,True,0.4073,"['catalog-svc version is v7.0', 'catalog-svc version is v7.0",
+edge_story_multiturn,edge,True,0.4339,"['shipping-svc version is v3.0', 'shipping-svc is now on v1.",
+edge_store_then_retrieve,edge,True,0.4282,['orders-db version is v3.0 and orders-db is owned by Team C,
+edge_multi_intent,edge,True,0.1488,What version is catalog-svc running and who owns orders-db?,

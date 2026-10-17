@@ -31,6 +31,8 @@ export default function EvidencePanel({ evidence, onSelect, onShowInGraph }) {
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={(e) => { e.stopPropagation(); onShowInGraph(item); }}
+                data-tooltip="Show in Graph: Focuses and highlights this memory node and its relationships in the 2D graph."
+                data-tooltip-pos="top"
               >
                 Show in graph
               </button>

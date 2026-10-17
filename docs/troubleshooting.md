@@ -64,12 +64,21 @@ python scripts/check_llm.py
 ```
 
 ### Solution
-1. **Deterministic Mock (Sub-millisecond testing & CI/CD)**:
+1. **High-Speed Cloud Tier (Groq - Primary)**:
+   In .env:
+   `ini
+   REAL_LLM=1
+   LLM_PROVIDER=groq
+   GROQ_API_KEY=gsk_your_key_here
+   GROQ_PRIMARY_MODEL=qwen/qwen3.8-27b
+   GROQ_FALLBACK_MODEL=openai/gpt-oss-20b
+   `
+2. **Deterministic Mock (Sub-millisecond testing & CI/CD)**:
    In `.env`:
    ```ini
    REAL_LLM=0
    ```
-2. **Local Sovereign (Ollama / Local Gemma)**:
+3. **Local Sovereign (Ollama / Local Gemma)**:
    Ensure Ollama is running (`ollama serve`), then in `.env`:
    ```ini
    REAL_LLM=1
@@ -77,7 +86,7 @@ python scripts/check_llm.py
    OLLAMA_MODEL_ID=gemma4-e2b:latest
    OLLAMA_BASE_URL=http://localhost:11434
    ```
-3. **Cloud Tier (Google GenAI)**:
+4. **Cloud Tier (Google GenAI)**:
    In `.env`:
    ```ini
    REAL_LLM=1

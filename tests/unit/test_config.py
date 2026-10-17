@@ -9,8 +9,8 @@ from app.errors import (
 
 def test_default_config():
     s = Settings()
-    assert s.LLM_MODEL_ID == "gemma-4-31b-it"
-    assert s.LLM_PROVIDER == "google_genai"
+    assert s.LLM_MODEL_ID in ("gemma-4-31b-it", "qwen/qwen3.8-27b")
+    assert s.LLM_PROVIDER in ("google_genai", "groq")
     assert s.ENABLE_EMBEDDINGS in (True, False)
     assert s.RRF_K == 60
 

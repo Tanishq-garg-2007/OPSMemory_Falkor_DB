@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { getConversations } from "../api.js";
 
+const SUGGESTED_QUERIES = [
+  "What is the current version of payments-api?",
+  "If postgres-orders fails, which customer-facing application is indirectly broken?",
+  "Outage on checkout: database lock contention observed on payments-api.",
+];
+
 function Paths({ paths }) {
   if (!Array.isArray(paths) || paths.length === 0) return null;
   return (
@@ -18,7 +24,7 @@ function Paths({ paths }) {
             {segments.map((x, j) =>
               j % 2 === 0
                 ? <span className="path-node" key={j}>{String(x)}</span>
-                : <span className="path-rel" key={j}>→ {String(x)} →</span>
+                : <span className="path-rel" key={j}> → {String(x)} → </span>
             )}
           </div>
         );
@@ -52,8 +58,7 @@ function LearnedBlock({ learned }) {
           <span className="learned-label">Superseded:</span>
           {superseded.map((s, i) => (
             <span className="learned-chip learned-superseded" key={s.old_id || i} title={`${s.old_id} → ${s.new_id}`}>
-              ↷ {s.title}
-            </span>
+              ↺ </span>
           ))}
         </div>
       )}
@@ -62,8 +67,7 @@ function LearnedBlock({ learned }) {
           <span className="learned-label">Tasks:</span>
           {tasks.map((t) => (
             <span className="learned-chip learned-task" key={t.id} title={t.id}>
-              ⚡ {t.task_type}
-            </span>
+              ⚡ </span>
           ))}
         </div>
       )}
@@ -163,6 +167,10 @@ export default function ChatPanel({ messages, onSend, conversationId, tenantKey,
     setInput("");
   };
 
+  const handleSuggestionClick = (query) => {
+    onSend(query);
+  };
+
   // Short display ID: last 8 chars of the conversation ID, or "No session"
   const shortId = conversationId ? conversationId.slice(-8) : null;
 
@@ -175,19 +183,25 @@ export default function ChatPanel({ messages, onSend, conversationId, tenantKey,
             id="new-conversation-btn"
             className="btn btn-secondary btn-sm"
             onClick={onNewConversation}
-            title="Start a new conversation"
+            data-tooltip="Start New Chat Session: Clears current dialogue to test Cross-Chat Persistent Memory. Memories learned in prior chats remain available in FalkorDB!"
+            data-tooltip-pos="bottom"
           >
-            + New
+            + New Chat
           </button>
           <button
             id="history-btn"
             className="btn btn-secondary btn-sm"
             onClick={() => setHistoryOpen(true)}
-            title="Browse past conversations"
+            data-tooltip="Conversation History: Browse and restore past conversation transcripts permanently stored in FalkorDB."
+            data-tooltip-pos="bottom"
           >
             History
           </button>
-          <span className="badge" title={conversationId || "No active session"}>
+          <span
+            className="badge"
+            data-tooltip={`FalkorDB Session ID: ${conversationId || 'No active session'}. Tracks turns and agent handoffs in graph.`}
+            data-tooltip-pos="bottom"
+          >
             {shortId ? shortId : "No session"}
           </span>
         </div>
@@ -196,6 +210,24 @@ export default function ChatPanel({ messages, onSend, conversationId, tenantKey,
         <div className="message system-message">
           <p>Welcome to <strong>OpsMemory</strong>. Ask about prior incidents (e.g. <code>inc-101</code>), current service facts, or runbooks, or report a new incident.</p>
         </div>
+
+        {messages.length === 0 && (
+          <div className="suggested-queries" style={{ margin: "1rem 0", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <span style={{ fontSize: "0.85rem", opacity: 0.8, fontWeight: 600 }}>Suggested Queries for Track 2:</span>
+            {SUGGESTED_QUERIES.map((q, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ textAlign: "left", whiteSpace: "normal", padding: "0.5rem 0.75rem", fontSize: "0.85rem", borderRadius: "6px" }}
+                onClick={() => handleSuggestionClick(q)}
+              >
+                👉 {q}
+              </button>
+            ))}
+          </div>
+        )}
+
         {messages.map((m) => <Message key={m.id} m={m} />)}
         <div ref={endRef} />
       </div>
@@ -207,7 +239,7 @@ export default function ChatPanel({ messages, onSend, conversationId, tenantKey,
           autoComplete="off"
           required
         />
-        <button type="submit" className="btn btn-primary">Send</button>
+        <button type="submit" className="btn btn-primary" data-tooltip="Send Query: Dispatches message to Triage Agent (extraction), Resolver Agent (retrieval), and Curator Agent (updates)." data-tooltip-pos="top">Send</button>
       </form>
 
       {historyOpen && (
