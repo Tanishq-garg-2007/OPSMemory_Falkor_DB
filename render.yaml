@@ -23,6 +23,8 @@ services:
         sync: false
       - key: FALKORDB_HOST
         sync: false
+      - key: FALKORDB_USERNAME
+        sync: false
       - key: FALKORDB_PORT
         sync: false
       - key: FALKORDB_PASSWORD

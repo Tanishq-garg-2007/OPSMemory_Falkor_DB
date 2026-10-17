@@ -88,6 +88,7 @@ class MemoryRepository:
         client = FalkorDB(
             host=self.settings.FALKORDB_HOST,
             port=self.settings.FALKORDB_PORT,
+            username=self.settings.FALKORDB_USERNAME or None,
             password=self.settings.FALKORDB_PASSWORD or None,
             socket_connect_timeout=timeout,
             socket_timeout=max(timeout * 3, 10.0),

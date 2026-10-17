@@ -9,8 +9,9 @@ TENANT_ID_RE = re.compile(r"[a-z0-9_]{1,48}")
 
 
 class Settings(BaseSettings):
+    _env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_env_file,
         env_file_encoding="utf-8",
         extra="ignore"
     )
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
     # FalkorDB settings
     FALKORDB_HOST: str = "localhost"
     FALKORDB_PORT: int = 6379
+    FALKORDB_USERNAME: Optional[str] = None
     FALKORDB_PASSWORD: Optional[str] = None
     FALKORDB_TIMEOUT_SECONDS: float = 3.0
 
