@@ -12,6 +12,7 @@ from eval.dataset.holdout_fixtures import seed_holdout_fixtures
 def main():
     parser = argparse.ArgumentParser(description="Seed OpsMemory fixtures")
     parser.add_argument("--tenant", choices=["acme", "beta", "gamma", "all"], default="all")
+    parser.add_argument("--reset", action="store_true", help="Wipe and reset tenant data before seeding")
     args = parser.parse_args()
 
     repo = get_memory_repository()
@@ -19,7 +20,9 @@ def main():
 
     for t in targets:
         ctx = TenantContext(tenant_id=t, graph_name=get_settings().tenant_graph_name(t))
-        reset_tenant_data(ctx, repo)
+        if args.reset:
+            reset_tenant_data(ctx, repo)
+            print(f"Reset tenant data for '{t}'.")
         stats = (seed_holdout_fixtures if t == "gamma" else seed_fixtures_for_tenant)(ctx, repo)
         print(f"Seeded tenant '{t}': {stats}")
 
