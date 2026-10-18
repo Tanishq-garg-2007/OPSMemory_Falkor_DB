@@ -890,29 +890,7 @@ strong { font-weight: 700; }
 
 /* ---------- Timeline view ---------- */
 .timeline-controls {
-  display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.8rem 1rem 0;
-  flex-wrap: nowrap;
-}
-.timeline-select {
-  min-width: 180px;
-  flex: 1;
-  max-width: 320px;
-  height: 36px;
-  background: var(--raised);
-  color: var(--text);
-  border: 1px solid var(--border-strong);
-  border-radius: 3px;
-  padding: 0.35rem 0.65rem;
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-.timeline-select:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 .timeline-summary {
   font-family: var(--font-sans);
@@ -1430,62 +1408,4 @@ strong { font-weight: 700; }
 }
 .header-new-chat-btn:hover {
   box-shadow: 0 0 0 3px var(--glow-a);
-}
-
-/* Handoff audit trail & rich task details */
-.handoffs-history {
-  margin-top: 1.2rem;
-  padding-top: 1rem;
-  border-top: 1px dashed var(--border);
-  width: 100%;
-}
-
-.handoffs-history-title {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 0.6rem;
-}
-
-.handoff-history-item {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 0.55rem 0.75rem;
-  margin-bottom: 0.45rem;
-  font-size: 0.8rem;
-}
-
-.handoff-history-agents {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--accent);
-  margin-bottom: 0.2rem;
-}
-
-.handoff-history-reason {
-  color: var(--text);
-  font-size: 0.82rem;
-  margin-bottom: 0.2rem;
-}
-
-.handoff-history-task {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--muted);
-}
-
-.task-title-sub {
-  font-size: 0.84rem;
-  color: var(--text);
-  margin-top: 0.35rem;
-}
-
-.task-desc-sub {
-  font-size: 0.78rem;
-  color: var(--muted);
-  margin-top: 0.2rem;
-  line-height: 1.4;
 }

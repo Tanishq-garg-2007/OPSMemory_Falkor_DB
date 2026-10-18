@@ -2,6 +2,9 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from app.llm import get_llm_client
+from app.core.logging import get_logger
+
+logger = get_logger("extraction")
 from app.llm.prompts import TRIAGE_SYSTEM_PROMPT
 from app.memory.signals import find_services, extract_version_updates, has_incident_signal, is_inquiry
 
@@ -57,8 +60,15 @@ class MemoryExtractor:
         )
         try:
             raw_json = await llm.generate_json(prompt, TRIAGE_SYSTEM_PROMPT)
-            return ExtractionResult.model_validate(raw_json)
-        except Exception:
+            result = ExtractionResult.model_validate(raw_json)
+            if not (result.episodic_memories or result.semantic_facts or result.procedural_requests):
+                # LLM found nothing: double-check with the deterministic extractor before dropping the message.
+                fallback = self._deterministic_extract(user_message, known_services)
+                if fallback.episodic_memories or fallback.semantic_facts or fallback.procedural_requests:
+                    return fallback
+            return result
+        except Exception as e:
+            logger.warning(f"LLM extraction failed, using deterministic fallback: {e}")
             # Fallback deterministic extraction
             return self._deterministic_extract(user_message, known_services)
 

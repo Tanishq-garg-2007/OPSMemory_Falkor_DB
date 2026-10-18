@@ -11,23 +11,27 @@ DEFAULT_KNOWN_SERVICES: Tuple[str, ...] = (
     "inventory-svc", "gateway-api", "payments-worker",
 )
 
-_INQUIRY_STARTERS = (
-    "what", "who", "when", "where", "why", "how", "which",
-    "is ", "are ", "can ", "could ", "does ", "did ", "do ", "will ", "would ", "should ",
-    # imperative requests for information are questions too
-    "show ", "tell ", "list ", "explain ", "describe ", "give me ", "identify ",
-    "compare ", "contrast ", "summarize ", "summarise ", "provide ", "outline ",
-    "walk me ", "find ", "check ", "look up ", "display ", "please show ", "please tell ",
+_WH_RE = re.compile(r"^(what|who|whom|whose|when|where|why|how|which)\b")
+_IMPERATIVE_RE = re.compile(
+    r"^(?:please\s+)?(?:show|tell|list|explain|describe|identify|compare|contrast|summari[sz]e|provide|"
+    r"outline|display|find|check|give\s+me|walk\s+me|look\s+up)\b(?!\s+(?:out|that|stopper)\b)"
 )
+_AUX_RE = re.compile(r"^(?:is|are|can|could|does|did|do|will|would|should)\b(?!\s+not\b|['\u2019]t)")
 
 
 def is_inquiry(text: str) -> bool:
-    """True for questions and requests for information (they must not become memories)."""
+    """True for questions and requests for information (they must not become memories).
+
+    Word-boundary matching: "However..." / "Whenever..." / "Do not deploy..." are statements.
+    """
     t = text.strip().lower()
-    return t.endswith("?") or t.startswith(_INQUIRY_STARTERS)
+    return t.endswith("?") or bool(_WH_RE.match(t) or _IMPERATIVE_RE.match(t) or _AUX_RE.match(t))
 
 
-_VERSION_RE = re.compile(r"\bv\d+(?:\.\d+){0,2}\b|(?<![\w.-])\d+\.\d+(?:\.\d+)?\b")
+_VERSION_RE = re.compile(
+    r"\bv\d+(?:\.\d+){0,2}\b"
+    r"|(?<![\w.-])\d+\.\d+(?:\.\d+)?\b(?!\s*(?:s|ms|sec|secs|seconds|min|mins|minutes|hours|%|gb|mb|kb|x|rps)\b)"
+)
 
 # Verbs/phrases that signal "this is the new state of a service", with or without the word "version".
 _UPDATE_CUE_RE = re.compile(
@@ -70,13 +74,21 @@ def extract_version_updates(text: str, services: Optional[List[str]] = None) -> 
         return []
     # Strip incident ids so "inc-101" or "2026-09-15" are never read as versions.
     scrubbed = re.sub(r"\binc[-_]?\d+\b|\b\d{4}-\d{2}-\d{2}\b", " ", t)
-    versions = [_normalize_version(v) for v in _VERSION_RE.findall(scrubbed)]
-    if not versions:
+    matches = list(_VERSION_RE.finditer(scrubbed))
+    if not matches:
         return []
     svc = (services if services is not None else find_services(text))
+    last = matches[-1]
+    version = _normalize_version(last.group(0))
+    # Subject = the service mentioned closest BEFORE the version (fallback: first service).
     subject = svc[0] if svc else "service"
-    # A single message states one current version; keep the last one mentioned ("from v2.4 to v2.5").
-    return [(subject, versions[-1])]
+    best = -1
+    for name in svc:
+        for form in (name.lower(), name.lower().replace("-", " ")):
+            pos = scrubbed.rfind(form, 0, last.start())
+            if pos > best:
+                best, subject = pos, name
+    return [(subject, version)]
 
 
 # Whole-word incident cues. Substring matching made "download" look like "down" and "known" look like "now".

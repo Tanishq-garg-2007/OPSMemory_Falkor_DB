@@ -8,7 +8,7 @@ router = APIRouter(tags=["Health"])
 
 
 @router.get("/healthz")
-async def health_check(settings: Settings = Depends(get_settings)):
+def health_check(settings: Settings = Depends(get_settings)):
     """Returns application health, persistence health, and LLM provider configuration."""
     from app.memory.repository import get_memory_repository
     repo = get_memory_repository()

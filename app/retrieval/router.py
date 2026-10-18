@@ -81,14 +81,13 @@ class RetrievalRouter:
         # Match incident IDs like inc-101 or incident 202
         inc_match = re.search(r"\b(?:incident\s+|inc[-_]?)([a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*)\b", q_lower)
         incident_id = None
-        if inc_match and inc_match.group(1).lower() != "ident":
+        if inc_match:
             val = inc_match.group(1).lower()
             if val.startswith("inc-") or val.startswith("inc_"):
                 val = val[4:]
-            if any(c.isdigit() for c in val) or "-" in val:
+            # Only real ids (must contain a digit): "include", "increase", "incident response" are not ids.
+            if any(c.isdigit() for c in val):
                 incident_id = f"inc-{val}"
-            else:
-                incident_id = inc_match.group(0)
 
         # Extract target entities dynamically
         target_entities: List[str] = []

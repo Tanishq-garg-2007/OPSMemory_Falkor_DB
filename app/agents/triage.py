@@ -25,8 +25,11 @@ class TriageAgent:
         message_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Triage input message: extract candidates, persist, and dispatch tasks."""
+        # Fresh lifecycle per call: `last_superseded` is per-request state and must not be shared
+        # between concurrent requests on the singleton coordinator.
+        lifecycle = type(self.lifecycle)(self.lifecycle.repo)
         # 1. Record source provenance
-        source = self.lifecycle.record_source(
+        source = lifecycle.record_source(
             context=context,
             conversation_id=conversation_id,
             message_id=message_id,
@@ -36,7 +39,7 @@ class TriageAgent:
 
         created_memories: List[MemoryModel] = []
         created_tasks: List[TaskModel] = []
-        self.lifecycle.last_superseded = []
+        lifecycle.last_superseded = []
 
         # Salience filter: questions and requests for information are never stored as memories.
         if is_inquiry(message):
@@ -51,7 +54,7 @@ class TriageAgent:
         # 2. Extract candidates
         # Service names come from this tenant's graph, not a built-in list (None when the graph can't be read).
         try:
-            known_services = [e.name for e in self.lifecycle.repo.list_entities(context, kind="service")]
+            known_services = [e.name for e in lifecycle.repo.list_entities(context, kind="service")]
         except Exception as e:
             logger.warning(f"Could not load known services: {e}")
             known_services = None
@@ -59,11 +62,13 @@ class TriageAgent:
 
         # 3. Persist episodic memories
         for epi in extracted.episodic_memories:
-            mem = self.lifecycle.store_memory(
+            # Unique per message: two incidents sharing a text prefix must not overwrite each other.
+            ep_title = f"{epi.title} [{(message_id or source.id)[-6:]}]" if epi.subtype == "incident" else epi.title
+            mem = lifecycle.store_memory(
                 context=context,
                 memory_type="episodic",
                 subtype=epi.subtype,
-                title=epi.title,
+                title=ep_title,
                 summary=epi.summary,
                 entity_names=epi.entity_names,
                 source_id=source.id,
@@ -86,7 +91,7 @@ class TriageAgent:
                     }
                 )
                 created_tasks.append(task)
-                self.lifecycle.repo.record_agent_handoff(
+                lifecycle.repo.record_agent_handoff(
                     context=context,
                     from_agent="agent_triage",
                     to_agent="agent_resolver",
@@ -100,7 +105,7 @@ class TriageAgent:
         for sem in extracted.semantic_facts:
             title = f"{sem.subject_entity} {sem.predicate}: {sem.object_value}"
             summary = f"{sem.subject_entity} {sem.predicate} is {sem.object_value}"
-            mem = self.lifecycle.store_memory(
+            mem = lifecycle.store_memory(
                 context=context,
                 memory_type="semantic",
                 subtype=sem.subtype,
@@ -115,7 +120,7 @@ class TriageAgent:
         # 5. Persist procedural requests
         for proc in extracted.procedural_requests:
             title = f"Procedure for {proc.trigger}"
-            mem = self.lifecycle.store_memory(
+            mem = lifecycle.store_memory(
                 context=context,
                 memory_type="procedural",
                 subtype=proc.subtype,
@@ -141,5 +146,5 @@ class TriageAgent:
             "source_id": source.id,
             "created_memories": created_memories,
             "created_tasks": created_tasks,
-            "superseded_memories": list(self.lifecycle.last_superseded)
+            "superseded_memories": list(lifecycle.last_superseded)
         }

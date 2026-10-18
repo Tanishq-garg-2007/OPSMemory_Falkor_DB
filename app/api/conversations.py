@@ -9,7 +9,7 @@ router = APIRouter(prefix="/v1/conversations", tags=["Conversations"])
 
 
 @router.get("")
-async def list_conversations(
+def list_conversations(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     context: TenantContext = Depends(get_tenant_context),
@@ -24,7 +24,7 @@ async def list_conversations(
 
 
 @router.get("/{conversation_id}/turns")
-async def get_conversation_turns(
+def get_conversation_turns(
     conversation_id: str,
     context: TenantContext = Depends(get_tenant_context),
     repo: MemoryRepository = Depends(get_memory_repository),
@@ -44,7 +44,7 @@ async def get_conversation_turns(
 
 
 @router.get("/{conversation_id}")
-async def get_conversation(
+def get_conversation(
     conversation_id: str,
     context: TenantContext = Depends(get_tenant_context),
     repo: MemoryRepository = Depends(get_memory_repository),

@@ -117,8 +117,20 @@ class Coordinator:
                 resolved_task_info.append({
                     "task_id": task.id,
                     "task_type": task.task_type,
-                    "status": "resolved" if resolve_res else "claimed",
+                    "status": "resolved" if resolve_res else "not_run",
                     "result": resolve_res
+                })
+            elif task.task_type == "CURATE_MEMORY":
+                stats = await self.curator_agent.claim_and_curate_task(context, task.id)
+                if stats is not None:
+                    self.repo.record_agent_handoff(
+                        context=context, from_agent="agent_triage", to_agent="agent_curator",
+                        task_id=task.id, reason="memory_curation", shared_state=stats,
+                        conversation_id=effective_conv_id,
+                    )
+                resolved_task_info.append({
+                    "task_id": task.id, "task_type": task.task_type,
+                    "status": "done" if stats is not None else task.status, "result": stats,
                 })
             else:
                 resolved_task_info.append({
@@ -139,50 +151,8 @@ class Coordinator:
             content=rag_response.answer
         )
 
-        # 5. Record ordered handoff chain: Triage -> Resolver -> Curator
-        triage_task_id = created_tasks[0].id if created_tasks else f"task_triage_{msg_id}"
-        resolve_task_id = None
-        for t in created_tasks:
-            if t.task_type == "RESOLVE_INCIDENT":
-                resolve_task_id = t.id
-                break
-        if not resolve_task_id:
-            resolve_task_id = f"task_resolve_{msg_id}"
-
-        curate_task_id = None
-        for t in created_tasks:
-            if t.task_type == "CURATE_MEMORY":
-                curate_task_id = t.id
-                break
-        if not curate_task_id:
-            curate_task_id = f"task_curate_{msg_id}"
-
-        self.repo.record_agent_handoff(
-            context=context,
-            from_agent="agent_triage",
-            to_agent="agent_resolver",
-            task_id=resolve_task_id,
-            reason="incident_triage" if any(t.task_type == "RESOLVE_INCIDENT" for t in created_tasks) else "query_resolution",
-            shared_state={"task_id": resolve_task_id, "triage_task": triage_task_id, "status": "triaged"},
-            turn_id=asst_turn_id,
-            conversation_id=effective_conv_id
-        )
-
-        self.repo.record_agent_handoff(
-            context=context,
-            from_agent="agent_resolver",
-            to_agent="agent_curator",
-            task_id=curate_task_id,
-            reason="memory_curation",
-            shared_state={"task_id": curate_task_id, "confidence": rag_response.confidence, "status": "resolved"},
-            turn_id=asst_turn_id,
-            conversation_id=effective_conv_id
-        )
-
-        try:
-            self.curator_agent.curator.curate_tenant(context)
-        except Exception as e:
-            logger.warning(f"Curator cycle error: {e}")
+        # 5. Handoffs are recorded by the agents that actually did the work (triage -> resolver in
+        #    TriageAgent, resolver -> curator in ResolverAgent / above). Nothing is fabricated here.
 
         # 6. Pack final response
         learned_created = [{"id": m.id, "title": m.title} for m in triage_res.get("created_memories", [])]

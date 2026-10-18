@@ -11,18 +11,24 @@ class RequestCoalescer:
 
     async def execute(self, key: str, fn: Callable[[], Awaitable[Any]]) -> Any:
         async with self._lock:
-            if key in self._inflight:
-                return await self._inflight[key]
-            loop = asyncio.get_running_loop()
-            future = loop.create_future()
-            self._inflight[key] = future
+            existing = self._inflight.get(key)
+            if existing is None:
+                future = asyncio.get_running_loop().create_future()
+                self._inflight[key] = future
+        if existing is not None:
+            # Wait OUTSIDE the lock, otherwise one slow query blocks every other request.
+            return await asyncio.shield(existing)
 
         try:
             result = await fn()
             future.set_result(result)
             return result
         except BaseException as ex:
-            future.set_exception(ex)
+            if isinstance(ex, asyncio.CancelledError):
+                future.cancel()
+            else:
+                future.set_exception(ex)
+                future.exception()  # mark retrieved: no "never retrieved" warning when nobody waits
             raise
         finally:
             async with self._lock:

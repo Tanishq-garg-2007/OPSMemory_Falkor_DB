@@ -10,7 +10,7 @@ router = APIRouter(prefix="/v1/graph", tags=["Graph"])
 
 
 @router.get("/context")
-async def get_graph_context(
+def get_graph_context(
     context: TenantContext = Depends(get_tenant_context),
     repo: MemoryRepository = Depends(get_memory_repository)
 ) -> Dict[str, Any]:
@@ -19,7 +19,7 @@ async def get_graph_context(
 
 
 @router.get("/topology")
-async def get_graph_topology(
+def get_graph_topology(
     max_nodes: int = Query(150, ge=10, le=500),
     context: TenantContext = Depends(get_tenant_context),
     repo: MemoryRepository = Depends(get_memory_repository),
@@ -33,6 +33,8 @@ async def get_graph_topology(
         "MATCH (n {tenant_id: $tid}) "
         "WHERE n.status IS NULL OR n.status <> 'deleted' "
         "RETURN n.id, labels(n), n.name, n.title, n.task_type, n.role, n.status "
+        "ORDER BY CASE WHEN 'Turn' IN labels(n) OR 'Session' IN labels(n) OR 'Conversation' IN labels(n) "
+        "THEN 1 ELSE 0 END "
         f"LIMIT {int(max_nodes)}",
         {"tid": tid},
     )

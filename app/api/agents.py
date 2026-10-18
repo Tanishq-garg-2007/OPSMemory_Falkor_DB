@@ -8,7 +8,7 @@ router = APIRouter(prefix="/v1/agents", tags=["Agents"])
 
 
 @router.get("/handoffs")
-async def get_agent_handoffs(
+def get_agent_handoffs(
     conversation_id: Optional[str] = Query(None),
     limit: int = Query(default=10, ge=1, le=100),
     context: TenantContext = Depends(get_tenant_context),

@@ -9,24 +9,26 @@ router = APIRouter(prefix="/v1/memories", tags=["Memories"])
 
 
 @router.get("")
-async def list_memories(
+def list_memories(
     status: Optional[str] = Query(None),
     memory_type: Optional[str] = Query(None),
     context: TenantContext = Depends(get_tenant_context),
     repo: MemoryRepository = Depends(get_memory_repository)
 ) -> List[Dict[str, Any]]:
     memories = repo.list_memories(context, status=status, memory_type=memory_type)
+    if status != "deleted":
+        memories = [m for m in memories if m.status != "deleted"]
     return [m.model_dump() for m in memories]
 
 
 @router.get("/{memory_id}")
-async def get_memory(
+def get_memory(
     memory_id: str,
     context: TenantContext = Depends(get_tenant_context),
     repo: MemoryRepository = Depends(get_memory_repository)
 ) -> Dict[str, Any]:
     memory = repo.get_memory(context, memory_id)
-    if not memory:
+    if not memory or memory.status == "deleted":
         raise ResourceNotFoundError(f"Memory '{memory_id}' not found")
     # Include related graph entities
     related_entities = repo.get_related_entities(context, memory_id)
@@ -36,7 +38,7 @@ async def get_memory(
 
 
 @router.delete("/{memory_id}")
-async def delete_memory(
+def delete_memory(
     memory_id: str,
     hard: bool = Query(False),
     context: TenantContext = Depends(get_tenant_context),

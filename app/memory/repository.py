@@ -717,17 +717,21 @@ class MemoryRepository:
         worker_id: str,
         result_json: str
     ) -> Optional[TaskModel]:
-        self.run_query(context, """
+        res = self.run_query(context, """
             MATCH (t:Task {id: $task_id, tenant_id: $tid})
-            WHERE t.lease_owner = $worker_id
+            WHERE t.lease_owner = $worker_id AND t.status = 'claimed'
             SET t.status = 'done', t.result_json = $result_json,
                 t.lease_owner = '', t.lease_expires = '',
                 t.version = coalesce(t.version, 1) + 1, t.updated_at = $now
+            RETURN t
         """, {
             "task_id": task_id, "tid": context.tenant_id, "worker_id": worker_id,
             "result_json": result_json, "now": utc_now_iso(),
         })
-        return self.get_task(context, task_id)
+        if not res.result_set:
+            logger.warning(f"complete_task ignored: {task_id} is not claimed by {worker_id}")
+            return None
+        return self._node_to_task(res.result_set[0][0])
 
     def fail_task(
         self,
@@ -736,16 +740,18 @@ class MemoryRepository:
         worker_id: str,
         reason: str
     ) -> Optional[TaskModel]:
-        self.run_query(context, """
+        res = self.run_query(context, """
             MATCH (t:Task {id: $task_id, tenant_id: $tid})
+            WHERE t.lease_owner = $worker_id
             SET t.status = 'failed', t.result_json = $result_json,
                 t.lease_owner = '', t.lease_expires = '',
                 t.version = coalesce(t.version, 1) + 1, t.updated_at = $now
+            RETURN t
         """, {
-            "task_id": task_id, "tid": context.tenant_id,
+            "task_id": task_id, "tid": context.tenant_id, "worker_id": worker_id,
             "result_json": json.dumps({"error": reason}), "now": utc_now_iso(),
         })
-        return self.get_task(context, task_id)
+        return self._node_to_task(res.result_set[0][0]) if res.result_set else None
 
     def recover_expired_leases(self, context: TenantContext) -> int:
         """Reset expired leases to pending, or fail the task once attempts >= 5. One atomic statement."""

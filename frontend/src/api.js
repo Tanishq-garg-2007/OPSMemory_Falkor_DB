@@ -11,7 +11,14 @@ async function request(path, { key, adminKey, method = "GET", body } = {}) {
   if (adminKey) headers["X-Admin-Key"] = adminKey;
   if (body) headers["Content-Type"] = "application/json";
   const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
-  if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const j = await res.json();
+      detail = j.message || (typeof j.detail === "string" ? j.detail : "") || detail;
+    } catch { /* body was not JSON */ }
+    throw new Error(`Error ${res.status}: ${detail}`);
+  }
   return res.json();
 }
 
@@ -20,10 +27,7 @@ async function request(path, { key, adminKey, method = "GET", body } = {}) {
 function getAdminKey() {
   let adminKey = sessionStorage.getItem(ADMIN_KEY_STORAGE);
   if (!adminKey) {
-    adminKey = window.prompt(
-      "Enter the admin key (ADMIN_API_KEY in .env, default: test_admin_secret):",
-      "test_admin_secret"
-    );
+    adminKey = window.prompt("Enter the admin key (ADMIN_API_KEY from your environment):");
     if (!adminKey) throw new Error("No admin key entered");
     sessionStorage.setItem(ADMIN_KEY_STORAGE, adminKey);
   }

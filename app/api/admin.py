@@ -21,7 +21,7 @@ def _admin_context(tenant_id: str, settings: Settings) -> TenantContext:
 
 
 @router.post("/seed")
-async def seed_data(
+def seed_data(
     tenant_id: str = Query("acme"),
     repo: MemoryRepository = Depends(get_memory_repository),
     settings: Settings = Depends(get_settings),
@@ -33,7 +33,7 @@ async def seed_data(
 
 
 @router.post("/reset")
-async def reset_data(
+def reset_data(
     tenant_id: str = Query("acme"),
     repo: MemoryRepository = Depends(get_memory_repository),
     settings: Settings = Depends(get_settings),

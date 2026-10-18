@@ -1,10 +1,20 @@
 """Evidence packing, token budgeting, prompt-injection defense, and answer generation."""
+import re
 from typing import List, Tuple, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.memory.models import MemoryModel
 from app.llm import get_llm_client
 from app.llm.prompts import ANSWER_SYSTEM_PROMPT
+from app.core.logging import get_logger
+
+logger = get_logger("evidence")
+_TAG_RE = re.compile(r"</?\s*untrusted_evidence\s*>", re.IGNORECASE)
+
+
+def _clean(text: str) -> str:
+    """Stop stored text from closing/opening the untrusted-evidence wrapper (prompt injection)."""
+    return _TAG_RE.sub("[tag removed]", text or "")
 
 
 class PackedEvidenceItem(BaseModel):
@@ -120,8 +130,8 @@ class EvidencePacker:
             valid_info = f"Valid: {it.valid_from}" + (f" to {it.valid_to}" if it.valid_to else " (current)")
             lines.append(
                 f"[Memory ID: {it.memory_id}] ({it.memory_type}/{it.subtype}, Status: {it.status}, Conf: {it.confidence}, {valid_info})\n"
-                f"Title: {it.title}\n"
-                f"Summary: {it.summary}\n"
+                f"Title: {_clean(it.title)}\n"
+                f"Summary: {_clean(it.summary)}\n"
             )
         lines.append("</untrusted_evidence>")
         return "\n".join(lines)
@@ -168,8 +178,10 @@ class RAGEngine:
                     clean_citations.append(str(c.get("memory_id") or c.get("id") or c))
                 else:
                     clean_citations.append(str(c))
+            valid_ids = {it.memory_id for it in packed_items}
+            clean_citations = [c for c in clean_citations if c in valid_ids]  # drop hallucinated ids
             return AnswerResponse(
-                answer=raw_result.get("answer", "No answer generated."),
+                answer=str(raw_result.get("answer") or "No answer generated."),
                 citations=clean_citations or [it.memory_id for it in packed_items[:2]],
                 confidence=combine_confidence(raw_result.get("confidence"), packed_items),
                 abstained=raw_result.get("abstained", False),
@@ -177,7 +189,8 @@ class RAGEngine:
                 evidence=packed_items,
                 reasoning_paths=r_paths
             )
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Answer LLM failed, using deterministic fallback: {e}")
             # Fallback deterministic answer synthesis from top evidence or graph paths
             if packed_items:
                 top_item = packed_items[0]

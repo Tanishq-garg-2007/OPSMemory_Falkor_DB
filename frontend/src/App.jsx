@@ -12,6 +12,13 @@ import { useTheme } from "./hooks.js";
 
 const INSPECTOR_HINT = 'Select a memory or click "Load All Memories" to inspect the graph JSON.';
 
+/** localStorage can throw (private mode / blocked): never let it crash the UI. */
+const safeStore = {
+  get: (k) => { try { return safeStore.get(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+  remove: (k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+};
+
 /** localStorage key for a given tenant's active conversation ID. */
 function convStorageKey(tenantId) {
   return `opsmemory-conversation-${tenantId}`;
@@ -34,14 +41,16 @@ export default function App() {
   const [conversationId, setConversationId] = useState(null);
   const [latestHandoffs, setLatestHandoffs] = useState([]);
   const nextId = useRef(1);
+  const tenantRef = useRef(null);
 
   const tenantId = TENANTS.find((t) => t.key === tenantKey).id;
+  tenantRef.current = tenantId;
 
   /** Persist the active conversation ID for this tenant. */
   const persistConvId = useCallback((tenantId, id) => {
     const key = convStorageKey(tenantId);
-    if (id) localStorage.setItem(key, id);
-    else localStorage.removeItem(key);
+    if (id) safeStore.set(key, id);
+    else safeStore.remove(key);
   }, []);
 
   const checkHealth = useCallback(async () => {
@@ -105,7 +114,7 @@ export default function App() {
 
   // On mount and on tenant switch: restore conversation from localStorage
   useEffect(() => {
-    const storedId = localStorage.getItem(convStorageKey(tenantId));
+    const storedId = safeStore.get(convStorageKey(tenantId));
     if (storedId) {
       restoreConversation(tenantKey, tenantId, storedId);
     }
@@ -120,8 +129,10 @@ export default function App() {
     try {
       const data = await sendChat(tenantKey, text, conversationId);
       const newConvId = data.conversation_id;
-      setConversationId(newConvId);
       persistConvId(tenantId, newConvId);
+      // The user switched tenant while this request was in flight: don't leak its state into the other tenant's view.
+      if (tenantRef.current !== tenantId) return;
+      setConversationId(newConvId);
       patch({ text: data.answer, paths: data.reasoning_paths, citations: data.citations, learned: data.learned });
       setEvidence(data.evidence || []);
       if (data.agent_handoffs) setLatestHandoffs(data.agent_handoffs);
@@ -154,7 +165,7 @@ export default function App() {
     setInspector(INSPECTOR_HINT);
     nextId.current = 1;
     // Restore conversation for the new tenant if one was previously stored
-    const storedId = localStorage.getItem(convStorageKey(newTenantId));
+    const storedId = safeStore.get(convStorageKey(newTenantId));
     if (storedId) {
       restoreConversation(key, newTenantId, storedId);
     }

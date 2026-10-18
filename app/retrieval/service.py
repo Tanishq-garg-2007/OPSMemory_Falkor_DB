@@ -38,31 +38,34 @@ class RetrievalService:
         coalesce_key = f"{context.tenant_id}:{q_hash}"
         return await self.coalescer.execute(coalesce_key, lambda: self._execute_retrieval(context, query, q_hash))
 
+    def _gather(self, context: TenantContext, query: str):
+        """Retrieval without any LLM call: anchors -> route -> graph/FTS/vector -> fusion."""
+        anchors = self.repo.find_anchor_entities(context, query, limit=5)
+        intent = self.router.route_query(query, anchor_entities=[a.name for a in anchors])
+        graph_paths = self.graph_searcher.get_dependency_paths(context, intent)
+        reasoning_paths = self.graph_searcher.get_reasoning_paths(context, intent)
+        graph_candidates = self.graph_searcher.search(context, intent, limit=20)
+        fts_candidates = self.fts_searcher.search(context, query, limit=20)
+        vector_candidates = self.vector_searcher.search(context, query, limit=10)
+        ranked = self.fusion.fuse(intent, graph_candidates, fts_candidates, vector_candidates)
+        return intent, ranked, graph_paths, reasoning_paths
+
+    async def retrieve_evidence(self, context: TenantContext, query: str):
+        """Evidence only (no answer LLM call). Used by the resolver to avoid a wasted LLM round trip."""
+        import asyncio
+        _, ranked, _, _ = await asyncio.to_thread(self._gather, context, query)
+        return self.rag_engine.packer.pack_evidence(ranked)
+
     async def _execute_retrieval(self, context: TenantContext, query: str, q_hash: str) -> AnswerResponse:
+        import asyncio
         if is_degenerate_query(query):
             return self._abstain("Please provide a valid question.")
 
         async with self.limiter.retrieval_semaphore:
-            # 1. Sub-millisecond Dynamic Semantic Vector Anchoring in FalkorDB
-            anchors = self.repo.find_anchor_entities(context, query, limit=5)
-            anchor_names = [a.name for a in anchors]
+            # Blocking FalkorDB calls run in a worker thread so the event loop stays free.
+            intent, ranked, graph_paths, reasoning_paths = await asyncio.to_thread(self._gather, context, query)
 
-            # 2. Route query dynamically with anchored entities
-            intent = self.router.route_query(query, anchor_entities=anchor_names)
-
-            # 3. Retrieve candidates and materialized graph paths
-            graph_paths = self.graph_searcher.get_dependency_paths(context, intent)
-            reasoning_paths = self.graph_searcher.get_reasoning_paths(context, intent)
-            graph_candidates = self.graph_searcher.search(context, intent, limit=20)
-            fts_candidates = self.fts_searcher.search(context, query, limit=20)
-            vector_candidates = self.vector_searcher.search(context, query, limit=10)
-
-            # 3. Fuse candidates
-            ranked = self.fusion.fuse(intent, graph_candidates, fts_candidates, vector_candidates)
-
-            # Grounding gate: nothing we remember relates to this question, so do not let the LLM improvise.
-            # Only entities the question actually names count; vector anchors always return nearest
-            # neighbours, even for nonsense, so they say nothing about whether the question is grounded.
+            # Grounding gate: only entities the question actually names count.
             q_low = query.lower()
             named = {e for e in intent.target_entities if e in q_low or e.replace("-", " ") in q_low}
             top = [mem for mem, _ in ranked[:20]]
@@ -70,13 +73,11 @@ class RetrievalService:
             if not has_grounding(query, (f"{m.title} {m.summary}" for m in top), entity_hit=entity_hit):
                 return self._abstain("Would you like to record this information in OpsMemory?")
 
-            # 4. Generate answer
             async with self.limiter.llm_semaphore:
                 response = await self.rag_engine.generate_answer(
                     query, ranked, graph_paths=graph_paths, reasoning_paths=reasoning_paths
                 )
 
-            # Cache response
             self.cache.set(context.tenant_id, q_hash, response, ttl=60.0)
             return response
 

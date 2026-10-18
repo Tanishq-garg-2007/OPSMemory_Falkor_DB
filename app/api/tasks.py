@@ -9,7 +9,7 @@ router = APIRouter(prefix="/v1/tasks", tags=["Tasks"])
 
 
 @router.get("")
-async def list_tasks(
+def list_tasks(
     status: Optional[str] = Query(None),
     context: TenantContext = Depends(get_tenant_context),
     repo: MemoryRepository = Depends(get_memory_repository)
@@ -19,7 +19,7 @@ async def list_tasks(
 
 
 @router.get("/{task_id}")
-async def get_task(
+def get_task(
     task_id: str,
     context: TenantContext = Depends(get_tenant_context),
     repo: MemoryRepository = Depends(get_memory_repository)

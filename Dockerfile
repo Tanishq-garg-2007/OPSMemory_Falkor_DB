@@ -3,7 +3,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 COPY . .
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . && useradd --create-home appuser && chown -R appuser /app
+USER appuser
 
 EXPOSE 8000
 

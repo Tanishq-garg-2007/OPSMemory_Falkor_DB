@@ -41,6 +41,8 @@ def get_llm_client(settings: Optional[Settings] = None) -> BaseLLMClient:
         else:
             logger.warning("REAL_LLM=1 specified but missing credentials or unsupported provider. Falling back to Mock.")
 
+    if s.REAL_LLM != 1:
+        logger.warning("REAL_LLM!=1: using the Mock LLM. Set REAL_LLM=1 plus a provider key for real answers.")
     # Default to deterministic Mock client
     _client_instance = MockLLMClient()
     return _client_instance

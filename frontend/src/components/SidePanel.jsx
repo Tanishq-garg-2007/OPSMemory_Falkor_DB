@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import { getAgentHandoffs, getTopology, getEntityTimeline } from "../api.js";
 
 export default function SidePanel({
@@ -24,110 +24,86 @@ export default function SidePanel({
   const [timeline, setTimeline] = useState([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
 
-  // Sync latestHandoffs prop cleanly (handle empty array resets on new chat)
+  // Sync latestHandoffs prop
   useEffect(() => {
-    setHandoffs(latestHandoffs || []);
+    if (latestHandoffs && latestHandoffs.length > 0) {
+      setHandoffs(latestHandoffs);
+    }
   }, [latestHandoffs]);
 
-  // Load handoffs on tab switch or manual refresh
-  const loadHandoffs = useCallback(async () => {
+  // Load handoffs on tab switch or refresh
+  const loadHandoffs = async () => {
     setHandoffsLoading(true);
     try {
-      const data = await getAgentHandoffs(tenantKey, conversationId || undefined, 15);
+      const data = await getAgentHandoffs(tenantKey, conversationId, 10);
       setHandoffs(data || []);
     } catch {
       // Keep existing handoffs on failure
     } finally {
       setHandoffsLoading(false);
     }
-  }, [tenantKey, conversationId]);
+  };
 
-  // Only trigger once when switching into the 'agents' tab or when tenantKey changes
   useEffect(() => {
-    if (tab === "agents") {
+    if (tab === "agents" && (!handoffs || handoffs.length === 0)) {
       loadHandoffs();
     }
-  }, [tab, tenantKey, conversationId, loadHandoffs]);
+  }, [tab, tenantKey, conversationId]);
 
-  // Load entities for timeline dropdown dynamically from live graph topology
-  const loadEntities = useCallback(() => {
+  // Load entities for timeline dropdown
+  useEffect(() => {
+    let cancelled = false;
     getTopology(tenantKey)
       .then((topo) => {
+        if (cancelled) return;
         const ents = (topo.nodes || []).filter((n) => n.type === "Entity");
         setEntities(ents);
         if (ents.length > 0) {
-          setSelectedEntity((prev) => (ents.some((e) => e.id === prev) ? prev : ents[0].id));
+          const defaultEnt = ents.find((e) => (e.label || "").toLowerCase() === "payments-api") || ents[0];
+          setSelectedEntity((prev) => (ents.some((e) => e.id === prev) ? prev : defaultEnt.id));
         } else {
           setSelectedEntity(null);
         }
       })
       .catch(() => {
-        setEntities([]);
-        setSelectedEntity(null);
+        if (!cancelled) setEntities([]);
       });
-  }, [tenantKey]);
+    return () => { cancelled = true; };
+  }, [tenantKey, tab]);
 
+  // Load timeline for selected entity
   useEffect(() => {
-    loadEntities();
-  }, [tenantKey, tab, loadEntities]);
-
-  // Re-fetch entities when new tasks appear (indicates a new memory or entity was learned)
-  useEffect(() => {
-    if (tasks && tasks.length > 0) {
-      loadEntities();
-    }
-  }, [tasks, loadEntities]);
-
-  // Load timeline for selected entity dynamically
-  const loadTimeline = useCallback(() => {
     if (!selectedEntity) {
       setTimeline([]);
       return;
     }
+    let cancelled = false;
     setTimelineLoading(true);
     getEntityTimeline(tenantKey, selectedEntity)
       .then((data) => {
-        setTimeline(data || []);
+        if (!cancelled) setTimeline(data || []);
       })
       .catch(() => {
-        setTimeline([]);
+        if (!cancelled) setTimeline([]);
       })
       .finally(() => {
-        setTimelineLoading(false);
+        if (!cancelled) setTimelineLoading(false);
       });
+    return () => { cancelled = true; };
   }, [tenantKey, selectedEntity]);
 
-  useEffect(() => {
-    loadTimeline();
-  }, [loadTimeline]);
-
-  // Derive latest turn relay from live handoff records
+  // Derive latest turn relay
   const latestTurnId = handoffs[0]?.turn_id;
-  const turnHandoffs = latestTurnId ? handoffs.filter((h) => h.turn_id === latestTurnId) : handoffs.slice(0, 3);
+  const turnHandoffs = latestTurnId ? handoffs.filter((h) => h.turn_id === latestTurnId) : handoffs.slice(0, 2);
 
   const triageHandoff = turnHandoffs.find((h) => h.from_agent === "agent_triage");
   const resolverHandoff = turnHandoffs.find((h) => h.to_agent === "agent_curator" || h.from_agent === "agent_resolver");
 
-  const triageTask = triageHandoff?.shared_state?.triage_task || triageHandoff?.task_id || "Active Triage";
-  const triageReason = triageHandoff?.reason ? triageHandoff.reason.replace(/_/g, " ") : "triage message";
-
-  const resolverTask = triageHandoff?.task_id || resolverHandoff?.shared_state?.resolve_task || "Active Resolution";
-  const resolverReason = triageHandoff?.reason ? triageHandoff.reason.replace(/_/g, " ") : "execute resolution";
-
-  const curatorTask = resolverHandoff?.task_id || resolverHandoff?.shared_state?.task_id || "Active Curation";
-  const curatorReason = resolverHandoff?.reason ? resolverHandoff.reason.replace(/_/g, " ") : "curate memory";
+  const triageTask = triageHandoff?.shared_state?.triage_task || triageHandoff?.task_id || "triage_message";
+  const resolverTask = triageHandoff?.task_id || resolverHandoff?.shared_state?.resolve_task || "resolve_query";
+  const curatorTask = resolverHandoff?.task_id || "curate_memories";
 
   const hasHandoffs = turnHandoffs.length > 0;
-
-  // Helper to parse task payload safely
-  const parsePayload = (task) => {
-    if (!task.payload_json) return null;
-    try {
-      return typeof task.payload_json === "string" ? JSON.parse(task.payload_json) : task.payload_json;
-    } catch {
-      return null;
-    }
-  };
 
   return (
     <section className="panel tasks-graph-panel">
@@ -138,7 +114,7 @@ export default function SidePanel({
           data-tooltip="Task Board: Tasks dispatched to workers with atomic Cypher mutual-exclusion leases."
           data-tooltip-pos="bottom"
         >
-          Task Board ({tasks?.length || 0})
+          Task Board
         </button>
         <button
           className={`tab-btn ${tab === "agents" ? "active" : ""}`}
@@ -146,7 +122,7 @@ export default function SidePanel({
           data-tooltip="Agent Relay: Real-time multi-agent handoffs (Triage &rarr; Resolver &rarr; Curator) with reasons and task IDs."
           data-tooltip-pos="bottom"
         >
-          Agents {handoffs.length > 0 ? `(${handoffs.length})` : ""}
+          Agents
         </button>
         <button
           className={`tab-btn ${tab === "timeline" ? "active" : ""}`}
@@ -173,25 +149,17 @@ export default function SidePanel({
         </div>
         <div className="tasks-list">
           {tasksError && <div className="empty-state">Error loading tasks: {tasksError}</div>}
-          {!tasksError && (!tasks || tasks.length === 0) && <div className="page-note">No open tasks in FalkorDB for this tenant.</div>}
-          {!tasksError && tasks && tasks.map((t) => {
-            const payload = parsePayload(t);
-            return (
-              <div key={t.id} className={`task-card ${t.status}`}>
-                <div className="task-head">
-                  <strong>{t.task_type}</strong>
-                  <span className={`badge ${t.status}`}>{t.status}</span>
-                </div>
-                {payload?.title && <div className="task-title-sub"><strong>Title:</strong> {payload.title}</div>}
-                {payload?.summary && <div className="task-desc-sub">{payload.summary}</div>}
-                <div className="task-sub">ID: <code>{t.id}</code></div>
-                <div className="task-sub">Lease Owner: <strong>{t.lease_owner || "Unassigned"}</strong></div>
-                {t.created_at && (
-                  <div className="task-sub">Created: {t.created_at.split(".")[0].replace("T", " ")}</div>
-                )}
+          {!tasksError && tasks.length === 0 && <div className="page-note">No open tasks</div>}
+          {!tasksError && tasks.map((t) => (
+            <div key={t.id} className={`task-card ${t.status}`}>
+              <div className="task-head">
+                <strong>{t.task_type}</strong>
+                <span className="badge">{t.status}</span>
               </div>
-            );
-          })}
+              <div className="task-sub">ID: <code>{t.id}</code></div>
+              <div className="task-sub">Lease Owner: {t.lease_owner || "None"}</div>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -204,54 +172,31 @@ export default function SidePanel({
         </div>
         <div className="agents-view">
           {!hasHandoffs ? (
-            <div className="page-note">
-              No handoffs recorded in this session yet.<br /><br />
-              Send a message (e.g. report an incident or ask a question) to see the live <strong>Triage &rarr; Resolver &rarr; Curator</strong> handoff chain.
-            </div>
+            <div className="page-note">No handoffs recorded for this turn.</div>
           ) : (
-            <>
-              <div className="agent-relay">
-                <div className="agent-card">
-                  <div className="agent-badge">Step 1: Extract & Triage</div>
-                  <strong className="agent-name">Triage Agent</strong>
-                  <div className="task-sub">Action: <strong>{triageReason}</strong></div>
-                  <div className="task-sub">Task: <code>{triageTask}</code></div>
-                </div>
-
-                <div className="relay-arrow" aria-hidden="true">&darr;</div>
-
-                <div className="agent-card">
-                  <div className="agent-badge">Step 2: Resolve & Synthesize</div>
-                  <strong className="agent-name">Resolver Agent</strong>
-                  <div className="task-sub">Action: <strong>{resolverReason}</strong></div>
-                  <div className="task-sub">Task: <code>{resolverTask}</code></div>
-                </div>
-
-                <div className="relay-arrow" aria-hidden="true">&darr;</div>
-
-                <div className="agent-card">
-                  <div className="agent-badge">Step 3: Graph Curation</div>
-                  <strong className="agent-name">Curator Agent</strong>
-                  <div className="task-sub">Action: <strong>{curatorReason}</strong></div>
-                  <div className="task-sub">Task: <code>{curatorTask}</code></div>
-                </div>
+            <div className="agent-relay">
+              <div className="agent-card">
+                <div className="agent-badge">Step 1</div>
+                <strong className="agent-name">Triage</strong>
+                <div className="task-sub">Task: <code>{triageTask}</code></div>
               </div>
 
-              {handoffs.length > 0 && (
-                <div className="handoffs-history">
-                  <div className="handoffs-history-title">Recent Handoff Audit Trail</div>
-                  {handoffs.slice(0, 6).map((h, idx) => (
-                    <div key={`${h.task_id}-${idx}`} className="handoff-history-item">
-                      <div className="handoff-history-agents">
-                        <code>{h.from_agent.replace("agent_", "")}</code> &rarr; <code>{h.to_agent.replace("agent_", "")}</code>
-                      </div>
-                      <div className="handoff-history-reason">Reason: <strong>{h.reason}</strong></div>
-                      <div className="handoff-history-task">Task: <code>{h.task_id}</code></div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
+              <div className="relay-arrow" aria-hidden="true">→</div>
+
+              <div className="agent-card">
+                <div className="agent-badge">Step 2</div>
+                <strong className="agent-name">Resolver</strong>
+                <div className="task-sub">Task: <code>{resolverTask}</code></div>
+              </div>
+
+              <div className="relay-arrow" aria-hidden="true">→</div>
+
+              <div className="agent-card">
+                <div className="agent-badge">Step 3</div>
+                <strong className="agent-name">Curator</strong>
+                <div className="task-sub">Task: <code>{curatorTask}</code></div>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -262,46 +207,35 @@ export default function SidePanel({
           <label className="tenant-label" htmlFor="timeline-entity-select">Entity:</label>
           <select
             id="timeline-entity-select"
-            className="tenant-select timeline-select"
+            className="tenant-select"
             value={selectedEntity || ""}
             onChange={(e) => setSelectedEntity(e.target.value)}
           >
-            {entities.length === 0 ? (
-              <option value="" disabled>No entities in graph</option>
-            ) : (
-              entities.map((e) => (
-                <option key={e.id} value={e.id}>{e.label || e.name || e.id}</option>
-              ))
-            )}
+            {entities.map((e) => (
+              <option key={e.id} value={e.id}>{e.label || e.name || e.id}</option>
+            ))}
           </select>
-          <button className="btn btn-secondary btn-sm" onClick={() => { loadEntities(); loadTimeline(); }} style={{ marginLeft: "auto" }}>
-            Refresh
-          </button>
         </div>
         <div className="tasks-list">
-          {timelineLoading && <div className="page-note">Loading timeline…</div>}
+          {timelineLoading && <div className="page-note">Loading…</div>}
           {!timelineLoading && timeline.length === 0 && (
-            <div className="page-note">
-              {entities.length === 0 
-                ? "No entities seeded for this tenant. Go to Admin ▾ → Seed Fixtures to load demo data."
-                : "No memories linked to this entity in the FalkorDB graph."}
-            </div>
+            <div className="page-note">No memories about this entity yet.</div>
           )}
           {!timelineLoading && timeline.map((m) => (
             <div key={m.id} className={`task-card ${m.status}`}>
               <div className="task-head">
                 <strong>{m.title}</strong>
-                <span className={`badge ${m.status}`}>{m.status}</span>
+                <span className="badge">{m.status}</span>
               </div>
               <div className={`timeline-summary ${m.status === "superseded" ? "superseded" : ""}`}>
                 {m.summary}
               </div>
               <div className="task-sub">
-                Validity: <strong>{m.valid_from ? m.valid_from.split("T")[0] : ""} {m.valid_to ? `to ${m.valid_to.split("T")[0]}` : "(currently active)"}</strong>
+                Valid: {m.valid_from ? m.valid_from.split("T")[0] : ""} {m.valid_to ? `to ${m.valid_to.split("T")[0]}` : "(current)"}
               </div>
               {m.superseded_by && (
                 <div className="timeline-arrow">
-                  &crarr; Superseded by: <code>{m.superseded_by}</code>
+↳ Superseded by: <code>{m.superseded_by}</code>
                 </div>
               )}
             </div>

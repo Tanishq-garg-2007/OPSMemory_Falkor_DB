@@ -21,7 +21,7 @@ class TenantContext:
             )
 
 
-async def get_tenant_context(
+def get_tenant_context(
     x_tenant_key: Optional[str] = Header(None, alias="X-Tenant-Key"),
 ) -> TenantContext:
     """Validate the tenant key against the tenants table (SHA-256 hashed keys only).

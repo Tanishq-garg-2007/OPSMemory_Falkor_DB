@@ -28,7 +28,7 @@ export default defineConfig({
   base: "/ui/",
   build: {
     outDir: "../app/ui/static",
-    emptyOutDir: false,
+    emptyOutDir: true,
   },
   server: {
     port: 5173,

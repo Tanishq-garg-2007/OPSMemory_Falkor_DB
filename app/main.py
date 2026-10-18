@@ -14,14 +14,44 @@ from app.api.graph import router as graph_router
 from app.api.agents import router as agents_router
 from app.api.entities import router as entities_router
 from app.core.logging import get_logger
+from contextlib import asynccontextmanager
 import os
 
 logger = get_logger("main")
 
 
+DEMO_TENANTS = (("acme", "OPSMEMORY_KEY_ACME", "key_acme_secret"),
+                ("beta", "OPSMEMORY_KEY_BETA", "key_beta_secret"),
+                ("gamma", "OPSMEMORY_KEY_GAMMA", "key_gamma_secret"))
+
+
+def bootstrap_tenants() -> None:
+    """Register demo tenants + schema at startup so a fresh deploy works without a manual script.
+
+    Never fatal: if FalkorDB is down the API still starts and answers 503 until it is reachable.
+    """
+    from app.memory.repository import get_memory_repository
+    try:
+        repo = get_memory_repository()
+        for tenant_id, env_name, default_key in DEMO_TENANTS:
+            repo.register_tenant(tenant_id, os.environ.get(env_name, default_key))
+            repo.init_tenant_schema(tenant_id)
+        logger.info("Tenants registered and schema initialised.")
+    except Exception as e:
+        logger.warning(f"Tenant bootstrap skipped ({e}).")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    import asyncio
+    await asyncio.to_thread(bootstrap_tenants)
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
+        lifespan=lifespan,
         title="OpsMemory",
         description="Persistent-memory and multi-agent coordination system for incident response",
         version="0.1.0",

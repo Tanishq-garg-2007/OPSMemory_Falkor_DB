@@ -28,7 +28,7 @@ class GroqClient(BaseLLMClient):
             from groq import AsyncGroq
             self._client = AsyncGroq(api_key=self.api_key)
         except Exception as e:
-            logger.warning(f"Could not initialize groq client: {e}")
+            logger.error(f"Groq client NOT available ({e}). Install the `groq` package; falling back.")
 
     async def _execute_text_fallback(self, prompt: str, system_prompt: Optional[str] = None, reason: str = "") -> str:
         if not self.allow_fallback:

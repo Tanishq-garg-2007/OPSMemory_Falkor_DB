@@ -33,6 +33,14 @@ class ResolverAgent:
             logger.info(f"Could not claim task {task_id} (already claimed or completed)")
             return None
 
+        try:
+            return await self._resolve(context, task_id, claimed)
+        except Exception as e:
+            logger.error(f"Resolver failed on {task_id}: {e}")
+            self.task_board.fail_task(context, task_id, self.worker_id, str(e))
+            return None
+
+    async def _resolve(self, context: TenantContext, task_id: str, claimed) -> Dict[str, Any]:
         payload = json.loads(claimed.payload_json or "{}")
         title = payload.get("title", "")
         summary = payload.get("summary", "")
@@ -40,10 +48,10 @@ class ResolverAgent:
 
         # Retrieve relevant runbooks and previous incident decisions
         query = f"runbook procedure for rollback {title} {' '.join(entities)}"
-        retrieval_response = await self.retrieval_service.retrieve_and_answer(context, query)
+        evidence = await self.retrieval_service.retrieve_evidence(context, query)
 
-        citations = retrieval_response.citations
-        evidence_text = "\n".join(f"- {e.title}: {e.summary}" for e in retrieval_response.evidence)
+        citations = [e.memory_id for e in evidence[:3]]
+        evidence_text = "\n".join(f"- {e.title}: {e.summary}" for e in evidence)
 
         # Build resolution proposal
         llm = get_llm_client()
@@ -53,7 +61,8 @@ class ResolverAgent:
             llm_result = await llm.generate_json(prompt, RESOLVER_SYSTEM_PROMPT)
             action_plan = llm_result.get("action_plan", ["Assess logs", "Execute verified rollback procedure"])
             recommendation = llm_result.get("recommendation", f"Follow runbook and notify on-call.")
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Resolver LLM failed, using generic plan: {e}")
             action_plan = ["Check telemetry", "Execute rollback if degradation exceeds threshold"]
             recommendation = "Standard incident containment procedure."
 

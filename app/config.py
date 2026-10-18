@@ -9,9 +9,8 @@ TENANT_ID_RE = re.compile(r"[a-z0-9_]{1,48}")
 
 
 class Settings(BaseSettings):
-    _env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
     model_config = SettingsConfigDict(
-        env_file=_env_file,
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore"
     )
@@ -29,9 +28,9 @@ class Settings(BaseSettings):
     GROQ_FALLBACK_MODEL: str = "openai/gpt-oss-20b"
     GOOGLE_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
-    LLM_TIMEOUT_SECONDS: int = 60
-    LLM_MAX_RETRIES: int = 2
-    LLM_MAX_OUTPUT_TOKENS: int = 700
+    LLM_TIMEOUT_SECONDS: int = 25
+    LLM_MAX_RETRIES: int = 1
+    LLM_MAX_OUTPUT_TOKENS: int = 1500
     LLM_TEMPERATURE: float = 0.1
     REAL_LLM: int = 0
     LLM_FALLBACK_PROVIDER: str = "mock"
@@ -50,7 +49,7 @@ class Settings(BaseSettings):
     ADMIN_API_KEY: Optional[str] = None
 
     # Retrieval
-    ENABLE_EMBEDDINGS: bool = True
+    ENABLE_EMBEDDINGS: bool = True  # keep in sync with .env.example
     EVIDENCE_TOKEN_BUDGET: int = 1200
     RRF_K: int = 60
 

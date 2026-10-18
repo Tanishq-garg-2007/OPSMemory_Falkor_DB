@@ -5,6 +5,7 @@ from app.memory.repository import MemoryRepository, get_memory_repository
 from app.memory.conflicts import detect_semantic_conflict
 from app.core.time import utc_now_iso, is_past
 from app.core.logging import get_logger
+from app.errors import ConflictError
 
 logger = get_logger("curator")
 
@@ -21,12 +22,19 @@ class MemoryCurator:
         expired_count = 0
 
         # 1. Check for expired memories (valid_to is in the past)
+        still_active = []
         for mem in active_memories:
             if mem.valid_to and is_past(mem.valid_to):
-                self.repo.update_memory_status(
-                    context, mem.id, new_status="expired", expected_version=mem.version
-                )
-                expired_count += 1
+                try:
+                    self.repo.update_memory_status(
+                        context, mem.id, new_status="expired", expected_version=mem.version
+                    )
+                    expired_count += 1
+                except ConflictError:
+                    pass
+            else:
+                still_active.append(mem)
+        active_memories = still_active
 
         # 2. Re-check active memories for unresolved conflicts / supersession
         now = utc_now_iso()
@@ -35,18 +43,20 @@ class MemoryCurator:
                 m1 = active_memories[i]
                 m2 = active_memories[j]
                 if detect_semantic_conflict(m1, m2):
+                    loser = winner = None
                     if m1.confidence > m2.confidence:
-                        self.repo.update_memory_status(
-                            context, m2.id, new_status="superseded", valid_to=now,
-                            expected_version=m2.version, superseded_by=m1.id
-                        )
-                        superseded_count += 1
+                        loser, winner = m2, m1
                     elif m2.confidence > m1.confidence:
-                        self.repo.update_memory_status(
-                            context, m1.id, new_status="superseded", valid_to=now,
-                            expected_version=m1.version, superseded_by=m2.id
-                        )
-                        superseded_count += 1
+                        loser, winner = m1, m2
+                    if loser is not None:
+                        try:
+                            self.repo.update_memory_status(
+                                context, loser.id, new_status="superseded", valid_to=now,
+                                expected_version=loser.version, superseded_by=winner.id
+                            )
+                            superseded_count += 1
+                        except ConflictError:
+                            logger.info(f"Curator skipped {loser.id}: changed concurrently")
 
         return {
             "tenant_id": context.tenant_id,
