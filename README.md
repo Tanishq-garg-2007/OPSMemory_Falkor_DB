@@ -6,7 +6,7 @@
 OpsMemory lets engineering and operations teams remember past incidents, decisions, service dependencies, versions, user preferences and runbooks across sessions. Specialised agents (triage, resolver, curator) coordinate through a shared, lease-based state graph that lives entirely in **FalkorDB**.
 
 - **Demo video:** _add link here before submitting_ (shot list in [docs/demo_script.md](docs/demo_script.md))
-- **Live deployment:** _add URL here if you deploy; `docker compose up -d --build` runs the full stack_
+- **Live deployment:** [https://opsmemory-9uet.onrender.com](https://opsmemory-9uet.onrender.com) (Web Console at [`/ui/`](https://opsmemory-9uet.onrender.com/ui/))
 - **AI assistance:** see [AI disclosure](#ai-disclosure)
 
 ---
@@ -66,34 +66,62 @@ Relationships:
 
 Tenants are registered in a control graph, `opsmemory_control` (`(:Tenant {tenant_id, graph_name, api_key_hash})`); raw API keys are never stored.
 
-## Key Cypher
+## Cypher Queries and Graph Algorithms
+
+OpsMemory relies on native FalkorDB Cypher queries and graph traversal algorithms to power persistent memory, multi-hop reasoning, and agent coordination:
+
+### 1. Graph Algorithms
+
+- **Directed Multi-Hop Dependency Traversal (Forward Reachability)**:
+  Traverses directed `(:Entity)-[:DEPENDS_ON]->(:Entity)` edges up to 3 hops deep to construct explainable `reasoning_paths` (e.g., `checkout-ui -> payments-api -> postgres-orders`).
+- **Blast-Radius Impact Analysis (Reverse Reachability)**:
+  Traverses reverse incoming dependency edges (`(dependent)-[:DEPENDS_ON]->(failed_service)`) to calculate indirect outages and downstream affected user interfaces.
+- **Temporal Supersession Chain Traversal (DAG Resolution)**:
+  Traverses `(:Memory)-[:SUPERSEDES]->(:Memory)` directed acyclic graphs to distinguish current production facts from historical/outdated context, resolving temporal queries like *"What was the version before v2.4?"*.
+- **Multi-Modal Reciprocal Rank Fusion (RRF Algorithm, $k=60$)**:
+  Fuses candidate rankings from three independent retrieval engines inside FalkorDB:
+  $$\text{RRF Score}(d) = \sum_{m \in \{\text{vector}, \text{fts}, \text{graph}\}} \frac{w_m}{k + \text{rank}_m(d)}$$
+  Augmented with confidence multipliers, recency decay, and status penalties.
+- **Distributed Mutual Exclusion (Atomic Lease Claim Algorithm)**:
+  Ensures exactly-once task execution across distributed agents using atomic single-roundtrip Cypher conditional writes with lease expiration timeouts.
+
+### 2. Core Cypher Queries
 
 ```cypher
 -- Indexes (per tenant graph)
 CREATE FULLTEXT INDEX FOR (m:Memory) ON (m.title, m.summary, m.subtype)
 CREATE VECTOR INDEX FOR (m:Memory) ON (m.embedding) OPTIONS {dimension: 64, similarityFunction: 'cosine'}
 
--- What does X depend on? (directed, two hops)
+-- 1. Forward Dependency Traversal (What does X depend on?)
 MATCH (e1:Entity {tenant_id: $tenant_id}) WHERE e1.id = $eid OR toLower(e1.name) = toLower($ent_name)
 MATCH (e1)-[:DEPENDS_ON]->(e2:Entity {tenant_id: $tenant_id})
 OPTIONAL MATCH (e2)-[:DEPENDS_ON]->(e3:Entity {tenant_id: $tenant_id}) WHERE e3 <> e1
 RETURN e1.name, e2.name, e3.name
 
--- What depends on X? (blast radius)
+-- 2. Blast Radius Analysis (What downstream services break if X fails?)
 MATCH (e1:Entity {tenant_id: $tenant_id}) WHERE e1.id = $eid OR toLower(e1.name) = toLower($ent_name)
 MATCH (e2:Entity {tenant_id: $tenant_id})-[:DEPENDS_ON]->(e1)
 OPTIONAL MATCH (e3:Entity {tenant_id: $tenant_id})-[:DEPENDS_ON]->(e2) WHERE e3 <> e1
 RETURN e3.name, e2.name, e1.name
 
--- Hybrid retrieval inputs
-CALL db.idx.fulltext.queryNodes('Memory', $fts_query) YIELD node, score
+-- 3. Hybrid Retrieval: Native Vector Similarity Search
 CALL db.idx.vector.queryNodes('Memory', 'embedding', $k, vecf32($query_vec)) YIELD node, score
+RETURN node, score
 
--- Atomic task claim (one round trip, lease-based)
+-- 4. Hybrid Retrieval: RediSearch Full-Text Search
+CALL db.idx.fulltext.queryNodes('Memory', $fts_query) YIELD node, score
+RETURN node, score
+
+-- 5. Atomic Task Claim (Mutual Exclusion with Lease)
 MATCH (t:Task {id: $task_id, tenant_id: $tenant_id})
 WHERE t.status = 'pending' OR (t.status = 'claimed' AND t.lease_expires < $now)
 SET t.status = 'claimed', t.lease_owner = $worker_id, t.lease_expires = $lease_expires
 RETURN t
+
+-- 6. Temporal Supersession Edge Creation
+MATCH (m_new:Memory {id: $new_id, tenant_id: $tid}), (m_old:Memory {id: $old_id, tenant_id: $tid})
+SET m_old.status = 'superseded', m_old.valid_to = $now, m_old.superseded_by = m_new.id
+CREATE (m_new)-[:SUPERSEDES]->(m_old)
 ```
 
 ## Setup
